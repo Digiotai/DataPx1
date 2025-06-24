@@ -1,0 +1,120 @@
+{% load static %}
+{% load filters %}
+<html>
+<head>
+	<title>HomePage</title>
+    <link rel="stylesheet" href="{% static 'css/all.min.css' %}">
+    <!-- Theme style -->
+    <link rel="stylesheet" href="{% static 'css/adminlte.min.css' %}">
+  <link rel="stylesheet" type="text/css" href="{% static '/css/main.css' %}">
+    <link rel="stylesheet" type="text/css" href="{% static '/css/tablestyle.css' %}">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js"></script>
+<style>
+    .accordion-button::after {
+      background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='%23333' xmlns='http://www.w3.org/2000/svg'%3e%3cpath fill-rule='evenodd' d='M8 0a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2H9v6a1 1 0 1 1-2 0V9H1a1 1 0 0 1 0-2h6V1a1 1 0 0 1 1-1z' clip-rule='evenodd'/%3e%3c/svg%3e");
+
+        transform: scale(.7) !important;
+    }
+
+    .accordion-button:not(.collapsed)::after {
+      background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='%23333' xmlns='http://www.w3.org/2000/svg'%3e%3cpath fill-rule='evenodd' d='M0 8a1 1 0 0 1 1-1h14a1 1 0 1 1 0 2H1a1 1 0 0 1-1-1z' clip-rule='evenodd'/%3e%3c/svg%3e");
+    }
+.accordion-header{
+    background: lightgray;
+}
+    table {text-align: center;}
+table thead th {text-align: center;}
+    ::-webkit-input-placeholder {
+        font-weight: 400;
+
+    }
+    :-moz-placeholder {
+        font-weight: 400;
+
+    }
+    ::-moz-placeholder {
+        font-weight: 400;
+
+    }
+    :-ms-input-placeholder {
+        font-weight: 400;
+
+    }
+
+.mystyle {
+    font-size: 11pt;
+    font-family: Arial;
+    border-collapse: collapse;
+    border: 1px solid silver;
+
+}
+
+table, th, td {
+  border: 1px solid;
+}
+
+.mystyle td, th {
+    padding: 5px;
+}
+
+
+
+.mystyle tr:hover {
+    background: silver;
+    cursor: pointer;
+}
+
+.mystyle thead th
+{
+    background: gray;
+}
+.highlight-imputed {
+    background-color: #ffcccc; /* Or your preferred color */
+}
+
+
+</style>
+</head>
+
+<body>
+{%  include 'navbar.html' %}
+<br>
+
+<table border="1">
+        <tr>
+            {% for col in df.0.keys %}
+                <th>{{ col }}</th>
+            {% endfor %}
+        </tr>
+
+{% for row in df %}
+    <tr>
+        {% for key, data_value in row.items %}
+
+                {% if data_value.is_imputed == 'True' %}
+                    <td class="highlight-imputed">{{ data_value.value }}</td>
+                {% else %}
+                    <td >{{ data_value.value }}</td>
+                {% endif %}
+
+        {% endfor %}
+    </tr>
+{% endfor %}
+
+
+
+
+
+
+
+
+
+    </table>
+{% if msg %}
+    <label>{{ msg }}</label>
+{% endif %}
+
+</body>
+
+</html>

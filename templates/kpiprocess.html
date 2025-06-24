@@ -1,0 +1,144 @@
+{% load static %}
+<html>
+<head>
+	<title>KPI Process</title>
+    <link rel="stylesheet" href="{% static 'css/all.min.css' %}">
+    <!-- Theme style -->
+    <link rel="stylesheet" href="{% static 'css/adminlte.min.css' %}">
+  <link rel="stylesheet" type="text/css" href="{% static '/css/main.css' %}">
+    <link rel="stylesheet" type="text/css" href="{% static '/css/tablestyle.css' %}">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js"></script>
+<style>
+    .accordion-button::after {
+      background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='%23333' xmlns='http://www.w3.org/2000/svg'%3e%3cpath fill-rule='evenodd' d='M8 0a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2H9v6a1 1 0 1 1-2 0V9H1a1 1 0 0 1 0-2h6V1a1 1 0 0 1 1-1z' clip-rule='evenodd'/%3e%3c/svg%3e");
+
+        transform: scale(.7) !important;
+    }
+
+    .accordion-button:not(.collapsed)::after {
+      background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='%23333' xmlns='http://www.w3.org/2000/svg'%3e%3cpath fill-rule='evenodd' d='M0 8a1 1 0 0 1 1-1h14a1 1 0 1 1 0 2H1a1 1 0 0 1-1-1z' clip-rule='evenodd'/%3e%3c/svg%3e");
+    }
+.accordion-header{
+    background: lightgray;
+}
+    table {text-align: center;}
+table thead th {text-align: center;}
+    ::-webkit-input-placeholder {
+        font-weight: 400;
+
+    }
+    :-moz-placeholder {
+        font-weight: 400;
+
+    }
+    ::-moz-placeholder {
+        font-weight: 400;
+
+    }
+    :-ms-input-placeholder {
+        font-weight: 400;
+
+    }
+
+.mystyle {
+    font-size: 11pt;
+    font-family: Arial;
+    border-collapse: collapse;
+    border: 1px solid silver;
+
+}
+
+table, th, td {
+  border: 1px solid;
+}
+
+.mystyle td, th {
+    padding: 5px;
+}
+
+
+
+.mystyle tr:hover {
+    background: silver;
+    cursor: pointer;
+}
+
+.mystyle thead th
+{
+    background: gray;
+}
+
+</style>
+</head>
+
+<body>
+{%  include 'navbar.html' %}
+<br>
+<form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+      <label> Prompt:  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;    <input type="text"
+               title="prompt"
+               name="prompt"
+               style="border: 1px solid black; padding: 5px; width:253px"></label><br><br>
+       &nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;  <input type="submit"
+               value="Analyze"
+               style="border: 1px solid green; padding:5px; border-radius: 2px; cursor: pointer; ">
+</form>
+
+
+
+{% if kpis %}
+
+<form method="post" enctype="multipart/form-data" action="{% url 'kpi_code' %}">
+        {% csrf_token %}
+
+  {% for i,j  in kpis.items %}
+      {% if i in checks %}
+            <input type="checkbox" name="kpi_names" value="{{ i }}" checked/>
+      {% else %}
+            <input type="checkbox" name="kpi_names" value="{{ i }}" />
+      {% endif %}
+      {% for k,l in j.items %}
+        {{ k }}:{{ l }}<br>
+      {% endfor %}
+      <br>
+  {% endfor %}
+    <br>
+        <input type="submit"
+               value="Show KPI Code"
+               style="border: 1px solid green; padding:5px; border-radius: 2px; cursor: pointer; ">
+</form>
+
+{% endif %}
+
+
+
+{% if code %}
+    <pre>
+    <code>
+{{ code|safe }}
+    </code></pre>
+{% endif %}
+
+
+{% if plots %}
+{% for name,i in plots %}
+    <div class="m-4">
+<div class="accordion-item">
+            <h2 class="accordion-header" id="heading{{ name }}" style="background: lightgray">
+                <button type="button" class="accordion-button"  data-bs-toggle="collapse" data-bs-target="#collapse{{ name }}">{{ name }}</button>
+            </h2>
+            <div id="collapse{{ name }}" class="accordion-collapse collapse show" data-bs-parent="#myAccordion">
+                <div class="card-body">
+                    <img src="../static/charts/{{ i }}" style="width: 1200px">
+                </div>
+            </div>
+</div>
+</div>
+{% endfor %}
+{% endif %}
+
+</body>
+
+</html>

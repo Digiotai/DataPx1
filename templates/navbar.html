@@ -1,0 +1,51 @@
+{% load static %}
+<style>
+  .hello-msg{
+    font-size: 18px;
+    color: #fff;
+    margin-right: 20px;
+  }
+li{
+    font-size: x-large;
+}
+</style>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
+ <!--<img src="{% static 'images/logo.png' %}" id="logo" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-->
+   <!-- <img src="{% static 'images/logo1.png' %}" id="logo" >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-->
+  <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="true" aria-label="Toggle navigation">
+    <span class="navbar-toggler-icon"></span>
+  </button>
+  <div class="collapse navbar-collapse" id="navbarNav">
+    <ul class="navbar-nav">
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'file_upload'  %}">Home</a>
+    </li>
+
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'data_process'  %}">DataProcess</a>
+    </li>
+
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'mvt'  %}">MVT</a>
+    </li>
+
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'kpi_process'  %}">KPIProcess</a>
+    </li>
+
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'kpi_store'  %}">KPI Store</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'models'  %}">Models</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'sustainability'  %}">Sustainability</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'sustainability1'  %}">Sustainability1</a>
+    </li>
+    </ul>
+  </div>
+
+</nav>

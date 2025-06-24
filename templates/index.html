@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+{% if form1 %}
+<form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+       <label>Data File: &nbsp;&nbsp;&nbsp; &nbsp;&nbsp;    <input type="file"
+               title="Upload csv file"
+               name="file"
+               style="border: 1px solid black; padding: 5px;"
+                      required="required" accept=".csv"></label>
+    <br><br><br>
+           <label>Config File: &nbsp;&nbsp;  &nbsp;&nbsp;   <input type="file"
+               title="Upload xml file"
+               name="kpi_file"
+               style="border: 1px solid black; padding: 5px;"
+                      accept=".xml"></label>
+    <br><br>
+        <label> Prompt:  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;    <input type="text"
+               title="prompt"
+               name="prompt"
+               style="border: 1px solid black; padding: 5px; width:253px"></label><br><br>
+       &nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;  <input type="submit"
+               value="Analyze"
+               style="border: 1px solid green; padding:5px; border-radius: 2px; cursor: pointer; ">
+</form>
+
+{% endif %}
+
+
+{% if kpis %}
+
+<form method="post" enctype="multipart/form-data" action="{% url 'generate_code' %}">
+        {% csrf_token %}
+
+  {% for i,j  in kpis.items %}
+      {% if i in checks %}
+            <input type="checkbox" name="kpi_names" value="{{ i }}" checked/>
+      {% else %}
+            <input type="checkbox" name="kpi_names" value="{{ i }}" />
+      {% endif %}
+      {% for k,l in j.items %}
+        {{ k }}:{{ l }}<br>
+      {% endfor %}
+      <br>
+  {% endfor %}
+    <br>
+        <input type="submit"
+               value="Show KPI Code"
+               style="border: 1px solid green; padding:5px; border-radius: 2px; cursor: pointer; ">
+</form>
+
+{% endif %}
+
+
+
+{% if code %}
+    <pre>
+    <code>
+{{ code }}
+    </code></pre>
+{% endif %}
+
+</body>
+</html>

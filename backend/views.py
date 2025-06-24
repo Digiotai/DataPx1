@@ -929,7 +929,7 @@ def uploadFile(request):
 
             file.seek(0)
             df = pd.read_csv(io.BytesIO(file_content))
-            new_df, html_df = process_missing_data(df.copy())
+            new_df, html_df,summary = process_missing_data(df.copy())
 
             aws_s3_obj.upload_file_obj_to_s3(new_df, s3_cred["credentials"]['base_bucket_name'],
                                              f'{user_id}/processed_files/processed_data.csv', 'csv')
@@ -943,7 +943,7 @@ def uploadFile(request):
             # session.session_name = f"Uploaded: {file.name}"
             # session.save()
 
-            aws_s3_obj.upload_file_obj_to_s3({"data": html_df}, s3_cred["credentials"]['base_bucket_name'],
+            aws_s3_obj.upload_file_obj_to_s3({"data": html_df, "summary":summary}, s3_cred["credentials"]['base_bucket_name'],
                                              f'{user_id}/processed_files/mvt_data.json', 'json')
             aws_s3_obj.upload_file_obj_to_s3({'file_name': file.name.split(".")[0]},
                                              s3_cred["credentials"]['base_bucket_name'],
@@ -1304,7 +1304,8 @@ def mvt(request):
 
     return JsonResponse(
         {
-            "df": data['data']
+            "df": data['data'],
+            "Summary": data['summary']
         }
     )
 
@@ -2307,6 +2308,7 @@ def handle_missing_data(df):
 
         # Convert the DataFrame into a JSON-serializable format with flags
         data = []
+
         for _, row in df.iterrows():
             row_data = {}
             for col in df.columns:
@@ -2316,9 +2318,36 @@ def handle_missing_data(df):
                     # Check if cell was imputed
                 }
             data.append(row_data)
-        return df, data
+        missing_values_summary = summarize_missing_values(imputed_flags)
+        return df, data, missing_values_summary
     except Exception as e:
         print(e)
+
+def summarize_missing_values(df):
+    try:
+        # 1. Total number of missing values
+        total_missing = df.sum().sum()
+
+        # 2. Columns with any missing values
+        columns_with_missing = df.columns[df.any()].tolist()
+
+        # 3. Count of missing values per column
+        missing_count_per_column = df.sum()
+
+        # 4. Percentage of missing values per column (optional)
+        missing_percentage = df.mean() * 100
+
+        # Final summary
+        summary = {
+            "total_missing_values": int(total_missing),
+            "columns_with_missing": columns_with_missing,
+            "missing_count_per_column": missing_count_per_column.to_dict(),
+            "missing_percentage_per_column": missing_percentage.round(2).to_dict()
+        }
+        return summary
+    except Exception as e:
+        print(e)
+        return {}
 
 
 def detect_and_parse_date(value):
@@ -2368,8 +2397,8 @@ def convert_to_datetime(df):
 
 def process_missing_data(df):
     df = convert_to_datetime(df)
-    df, html_df = handle_missing_data(df)
-    return df, html_df
+    df, html_df, summary = handle_missing_data(df)
+    return df, html_df, summary
 
 
 def encode_image_to_base64(image_path):

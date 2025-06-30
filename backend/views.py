@@ -119,8 +119,11 @@ def loginPage(request):
         if user is not None:
             # Log the user in
             login(request, user)
-
-            user_role = UserRole.objects.get(user_id=user.id)
+            try:
+                user_role = UserRole.objects.get(user_id=user.id)
+                organization = Organization.objects.get(id=user_role.organization.id)
+            except Exception as e:
+                JsonResponse({"status": "error", "message": f"{e}"}, status=400)
             # Prepare the user details to return as a response
             user_details = {
                 'username': user.username,
@@ -128,6 +131,7 @@ def loginPage(request):
                 'id': user.id,
                 'last_login': user.last_login,
                 'role': user_role.role,
+                'tenant': organization.tenant_id,
                 'organization': user_role.organization.id
             }
 
@@ -929,7 +933,7 @@ def uploadFile(request):
 
             file.seek(0)
             df = pd.read_csv(io.BytesIO(file_content))
-            new_df, html_df,summary = process_missing_data(df.copy())
+            new_df, html_df, summary = process_missing_data(df.copy())
 
             aws_s3_obj.upload_file_obj_to_s3(new_df, s3_cred["credentials"]['base_bucket_name'],
                                              f'{user_id}/processed_files/processed_data.csv', 'csv')
@@ -943,7 +947,8 @@ def uploadFile(request):
             # session.session_name = f"Uploaded: {file.name}"
             # session.save()
 
-            aws_s3_obj.upload_file_obj_to_s3({"data": html_df, "summary":summary}, s3_cred["credentials"]['base_bucket_name'],
+            aws_s3_obj.upload_file_obj_to_s3({"data": html_df, "summary": summary},
+                                             s3_cred["credentials"]['base_bucket_name'],
                                              f'{user_id}/processed_files/mvt_data.json', 'json')
             aws_s3_obj.upload_file_obj_to_s3({'file_name': file.name.split(".")[0]},
                                              s3_cred["credentials"]['base_bucket_name'],
@@ -1248,7 +1253,7 @@ def kpi_prompt(request):
 
                 df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
                                               f'{user_id}/processed_files/processed_data.csv', 'csv')
-                df.to_csv(file_path)
+                df.to_csv(file_path, index=False)
 
                 prompt_desc = (
                     f"You are analytics_bot. Analyse the data: {df.head()} and for the uer query {prompt}, "
@@ -1316,7 +1321,7 @@ def kpi_code(request):
         if request.method == "POST":
             kpi_list = request.POST.getlist("kpi_names")
             user_id = request.headers.get('X-User-id')
-            paths, codes = generate_kpi_code(kpi_list,user_id)
+            paths, codes = generate_kpi_code(kpi_list, user_id)
             return JsonResponse({
                 'plots': paths,
                 'code': codes,
@@ -1334,8 +1339,15 @@ def models(request):
         if not aws_s3_obj.check_s3_file(s3_cred["credentials"]['base_bucket_name'],
                                         f'{user_id}/processed_files/processed_data.csv'):
             return JsonResponse({"msg": 'Please upload the file to continue'})
+        user_dir = os.path.join(settings.MEDIA_ROOT, 'temp_uploads', f"user_{user_id}")
+        if os.path.exists(user_dir):
+            shutil.rmtree(user_dir)
+        os.makedirs(user_dir, exist_ok=True)
+        file_path = os.path.join(user_dir, 'data.csv')
+
         df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
                                       f'{user_id}/processed_files/processed_data.csv', 'csv')
+        df.to_csv(file_path, index=False)
         single_value_columns = [col for col in df.columns if df[col].nunique() == 1]
         df.drop(single_value_columns, axis=1, inplace=True)
         numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
@@ -1390,13 +1402,13 @@ def models(request):
                             'msg': data
                         })
             elif model_type == 'OutlierDetection':
-                res = outliercheck(df, col)
+                out_res = outliercheck(df, col)
 
                 return JsonResponse(
                     {
                         'columns': list(df.columns),
                         "status": True,
-                        "processed_data": res,
+                        "processed_data": out_res,
                         "OutlierDetection": True
                     })
         else:
@@ -1412,22 +1424,59 @@ def models(request):
         )
 
 
-def outliercheck(df, column):
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": f'detect outliers for  the following data {df[column]}'}
-        ]
+def outliercheck(data, column):
+
+    # Check if 'Target' column exists
+    if column not in data.columns:
+        raise ValueError("The column 'Target' does not exist in the CSV file.")
+
+        # Calculate Q1 (25th percentile) and Q3 (75th percentile)
+    Q1 = data[column].quantile(0.25)
+    Q3 = data[column].quantile(0.75)
+
+    # Calculate Interquartile Range (IQR)
+    IQR = Q3 - Q1
+
+    # Define the bounds for outliers
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+
+    # Identify outliers
+    outliers = data[(data[column] < lower_bound) | (data[column] > upper_bound)]
+    summary_text = (
+        f"<p>A total of <strong>{len(outliers)} outliers</strong> were detected.</p>"
+        f"<p>These values may represent rare events, data entry errors, or legitimate but extreme variations.</p>"
+        if len(outliers) > 0 else
+        "<p> <strong>No outliers present</strong> in the dataset.</p>"
     )
-    all_text = ""
-    # Display generated content dynamically
-    for choice in response.choices:
-        message = choice.message
-        chunk_message = message.content if message else ''
-        all_text += chunk_message
-    print(all_text)
-    return all_text
+
+    outlier_section = ""
+    if len(outliers) > 0:
+        outlier_table = outliers.to_html(index=False, border=1, classes='table table-striped', justify='center')
+        outlier_section = f"<h4> Detected Outlier Values:</h4>{outlier_table}"
+
+    output = f"""
+    <div style="font-family:Arial,sans-serif; line-height:1.6;">
+      <h3>Outlier Analysis Report for <code>{column}</code></h3>
+
+      <p>We analyzed the distribution of the <code>{column}</code> values using the
+      <strong>Interquartile Range (IQR)</strong> method to detect potential outliers.</p>
+
+      <ul>
+        <li><strong>Lower Bound:</strong> Values below <code>{lower_bound:.2f}</code></li>
+        <li><strong>Upper Bound:</strong> Values above <code>{upper_bound:.2f}</code></li>
+      </ul>
+
+      <p>Any data points falling <strong>outside this range</strong> are considered <strong>outliers</strong>.</p>
+
+      <hr/>
+
+      <h4> Summary:</h4>
+      {summary_text}
+      {outlier_section}
+    </div>
+    """
+    return output
 
 
 def random_forest(data, target_column, user_id=None):
@@ -1556,7 +1605,7 @@ def gen_ai_bot(request):
         df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
                                       f'{user_id}/processed_files/processed_data.csv', 'csv')
         print(file_path)
-        df.to_csv(file_path)
+        df.to_csv(file_path, index=False)
 
         metadata_str = ", ".join(df.columns.tolist())
         sample_data = df.head(2).to_dict(orient='records')
@@ -1598,7 +1647,8 @@ def gen_ai_bot(request):
                     _ = random_forest(df, bot_data.get('target_column'), user_id)
                 df = pd.DataFrame([bot_data.get('features')])
                 loaded_pipeline = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                                           f'{user_id}/output/models/rf/{bot_data["target_column"]}/pipeline.pkl', 'pkl')
+                                                           f'{user_id}/output/models/rf/{bot_data["target_column"]}/pipeline.pkl',
+                                                           'pkl')
                 predictions = loaded_pipeline.predict(df)
                 print(predictions)
                 return JsonResponse({
@@ -2034,8 +2084,6 @@ def generate_kpi_code(kpi_list, user_id):
             shutil.rmtree(os.path.join(os.getcwd(), f'static/charts'))
         os.makedirs(f'static/charts', exist_ok=True)
 
-
-
         for kpi in kpi_list:
             prompt_desc = (
                 f"""You are ai_bot.Make sure to read the data from the path {data_file_path} which is of csv format and with example data as {df.head()} and generate Python code with KPI details as {KPI_LOGICS[kpi]}. 
@@ -2141,9 +2189,14 @@ def plot_numeric(numeric_vars, dataframe):
             width=1000,  # Equivalent to figsize=(20, 10)
             height=500
         )
-
+        # fig_data = generate_gpt_insight_payload(fig)
+        # insights = get_graph_insights(fig_data)
         # Convert figure to JSON for rendering in web applications
-        plots[i] = make_serializable(fig.to_json())
+        # plots[i] = {
+        #     "plot":make_serializable(fig.to_json()),
+        #     'insights':insights
+        # }
+        plots[i] =make_serializable(fig.to_json())
 
     return plots
 
@@ -2166,7 +2219,14 @@ def plot_categorical(categorical_vars, dataframe):
         )
 
         # Convert figure to JSON for web rendering
-        plots[list(i)[0]] = fig.to_json()
+        # fig_data = generate_gpt_insight_payload(fig)
+        # insights = get_graph_insights(fig_data)
+        # # Convert figure to JSON for rendering in web applications
+        # plots[list(i)[0]] = {
+        #     "plot": make_serializable(fig.to_json()),
+        #     'insights': insights
+        # }
+        plots[list(i)[0]] = make_serializable(fig.to_json())
 
     return plots
 
@@ -2215,6 +2275,108 @@ def plot_wordCloud(text_data, dataframe):
 
     return plots
 
+def get_graph_insights(data):
+    system_prompt = """
+            You are a data analyst AI assistant. When given a Plotly chart's metadata and data (such as title, type, axes, and data points), your job is to:
+        
+        1. Clearly describe the chart type and its purpose.
+        2. Summarize key patterns or trends in the data (increases, decreases, clusters, outliers).
+        3. Highlight important statistics (peaks, valleys, averages, or changes over time).
+        4. Identify any anomalies, seasonality, or cyclical patterns if present.
+        5. Return your observations in clear, business-friendly language.
+        
+        Be concise but insightful. If a user asks follow-up questions, respond as a data analyst would. Do not guess about what is not shown in the data.
+
+    """
+    messages = [{"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Here is the chart data:\n```json\n{json.dumps(data, indent=2, default=str)}\n```"}]
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.3
+        )
+        return response.choices[0].message.content
+
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+def generate_gpt_insight_payload(fig, fallback_title: str = "Chart"):
+    """
+    Extracts key chart info from Plotly (Bar, Pie, Word Cloud-style scatter).
+    Returns a structured payload ready for GPT analysis.
+    """
+    chart_type = None
+    data_points = []
+    summary_stats = {}
+    reference_lines = {}
+
+    # Determine chart type
+    trace = fig.data[0] if fig.data else None
+    if not trace:
+        return {"chart_type": "Empty Figure", "data_points": [], "summary_stats": {}}
+
+    title = fig.layout.title.text if fig.layout.title.text else fallback_title
+
+    # === BAR CHART ===
+    if trace.type == "bar":
+        x = list(trace.x)
+        y = list(trace.y)
+        series = pd.Series(y)
+
+        chart_type = "Bar Chart"
+        data_points = list(zip(x, y))
+        reference_lines = {
+            "min": round(series.min(), 2),
+            "max": round(series.max(), 2),
+            "median": round(series.median(), 2)
+        }
+        summary_stats = {
+            "mean": round(series.mean(), 2),
+            "std_dev": round(series.std(), 2),
+            "missing_count": int(series.isnull().sum()),
+            "unique_values": int(series.nunique())
+        }
+
+    # === PIE CHART ===
+    elif trace.type == "pie":
+        labels = list(trace.labels)
+        values = list(trace.values)
+
+        chart_type = "Pie Chart"
+        data_points = list(zip(labels, values))
+        summary_stats = {
+            "total": round(sum(values), 2),
+            "category_count": len(labels),
+            "largest_category": labels[values.index(max(values))],
+            "smallest_category": labels[values.index(min(values))]
+        }
+
+    # === WORD CLOUD (scatter with text + size) ===
+    elif trace.type == "scatter" and getattr(trace, 'mode', '') == "text":
+        words = list(trace.text)
+        sizes = list(trace.marker.size)
+
+        chart_type = "Word Cloud"
+        data_points = list(zip(words, sizes))
+        summary_stats = {
+            "unique_words": len(words),
+            "most_prominent_word": words[sizes.index(max(sizes))],
+            "least_prominent_word": words[sizes.index(min(sizes))]
+        }
+
+    else:
+        chart_type = "Unsupported"
+        summary_stats = {"note": "Only bar, pie, and word cloud (scatter-text) are supported."}
+
+    return {
+        "chart_type": chart_type,
+        "title": title,
+        "data_points": data_points,
+        "reference_lines": reference_lines,
+        "summary_stats": summary_stats
+    }
+
 
 def updatedtypes(df):
     datatypes = df.dtypes
@@ -2253,17 +2415,33 @@ def checkSentiment(df, categorical):
             sentiment = "Y"
     return sentiment
 
+def is_integer_like(series):
+    return pd.api.types.is_numeric_dtype(series) and \
+           series.dropna().apply(lambda x: float(x).is_integer()).all()
 
 def handle_missing_data(df):
     try:
+        ignore_types = ['object', 'string', 'timedelta', 'complex']
+        ignored_columns_info = {}
+
         # Identify numeric and datetime columns
         numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
         date_time_cols = df.select_dtypes(include=['datetime64']).columns
+        ignored_cols = df.select_dtypes(include=ignore_types).columns
+        int_like_cols = [col for col in numeric_cols if is_integer_like(df[col])]
+
+        for col in ignored_cols:
+            ignored_columns_info[col] = f"Ignored because of optional data"
+
 
         # Impute numeric columns and track which cells were imputed
         imputer = KNNImputer(n_neighbors=5)
         imputed_numeric = imputer.fit_transform(df[numeric_cols])
         imputed_numeric_df = pd.DataFrame(imputed_numeric, columns=numeric_cols).round(2)
+
+        for col in numeric_cols:
+            if col in int_like_cols:
+                imputed_numeric_df[col] = imputed_numeric_df[col].round().astype("Int64")
 
         # Mark imputed cells (True if the original cell was NaN)
         imputed_flags = df[numeric_cols].isnull()
@@ -2271,6 +2449,15 @@ def handle_missing_data(df):
 
         # Update DataFrame with imputed values
         df[numeric_cols] = imputed_numeric_df
+
+        for col in df.select_dtypes(include='category').columns:
+            if df[col].isnull().any():
+                mode_val = df[col].mode().iloc[0] if not df[col].mode().empty else "Unknown"
+                df[col].fillna(mode_val, inplace=True)
+                imputed_flags[col] = df[col].isnull()
+        for col in df.select_dtypes(include='bool').columns:
+            if df[col].isnull().any():
+                df[col].fillna(df[col].mode().iloc[0], inplace=True)
 
         # Handle datetime columns by forward filling missing values
         for col in date_time_cols:
@@ -2319,9 +2506,11 @@ def handle_missing_data(df):
                 }
             data.append(row_data)
         missing_values_summary = summarize_missing_values(imputed_flags)
+        missing_values_summary["ignored_columns"] = ignored_columns_info
         return df, data, missing_values_summary
     except Exception as e:
         print(e)
+
 
 def summarize_missing_values(df):
     try:
@@ -2444,7 +2633,15 @@ def additional_plots(df):
         )
 
         # Show the interactive 3D plot
+
+        # fig_data = generate_gpt_insight_payload(fig)
+        # insights = get_graph_insights(fig_data)
+        # Convert figure to JSON for rendering in web applications
         plots["CO2 Emissions"] = make_serializable(fig.to_json())
+        """{
+            "plot": make_serializable(fig.to_json()),
+            'insights': insights
+        }"""
     except Exception as e:
         print(e)
 
@@ -2458,7 +2655,15 @@ def additional_plots(df):
             title="Distribution of Achievement% by EquipID",
             color="EquipID"
         )
+        fig_data = generate_gpt_insight_payload(fig)
+        insights = get_graph_insights(fig_data)
+        # Convert figure to JSON for rendering in web applications
         plots["Distribution of Achievement% by EquipID"] = make_serializable(fig.to_json())
+
+        #     {
+        #     "plot": make_serializable(fig.to_json()),
+        #     'insights': insights
+        # }
     except Exception as e:
         print(e)
 
@@ -2481,7 +2686,14 @@ def additional_plots(df):
                 ]
             }
         ))
+        # fig_data = generate_gpt_insight_payload(fig)
+        # insights = get_graph_insights(fig_data)
+        # # Convert figure to JSON for rendering in web applications
         plots["Latest Achievement"] = make_serializable(fig.to_json())
+        # {
+        #     "plot": make_serializable(fig.to_json()),
+        #     'insights': insights
+        # }
     except Exception as e:
         print(e)
 
@@ -2496,7 +2708,14 @@ def additional_plots(df):
                                      mode='lines', name=f'Equip {equip} - Target', line=dict(dash='dash')))
 
         fig.update_layout(title="Actual vs Target CO₂ Emissions", xaxis_title="Date", yaxis_title="CO₂ Emission")
-        plots["Actual vs Target CO₂ Emissions"] = make_serializable(fig.to_json())
+        # fig_data = generate_gpt_insight_payload(fig)
+        # insights = get_graph_insights(fig_data)
+        # Convert figure to JSON for rendering in web applications
+        plots["Actual vs Target CO₂ Emissions"] =make_serializable(fig.to_json())
+        #     {
+        #     "plot": make_serializable(fig.to_json()),
+        #     'insights': insights
+        # }
     except Exception as e:
         print(e)
 
@@ -2505,14 +2724,28 @@ def additional_plots(df):
 
         fig = px.scatter(df, x="Date", y="Achievement%", color="Alert", symbol="EquipID",
                          size="Deficit%", title="KPI Alert Monitor")
+        # fig_data = generate_gpt_insight_payload(fig)
+        # insights = get_graph_insights(fig_data)
+        # Convert figure to JSON for rendering in web applications
         plots["KPI Alert Monitor"] = make_serializable(fig.to_json())
+        #     {
+        #     "plot": make_serializable(fig.to_json()),
+        #     'insights': insights
+        # }
     except Exception as e:
         print(e)
 
     try:
         fig = px.area(df, x="Date", y="CO2 Emission - Actual", color="EquipID",
                       title="Stacked CO₂ Emission Over Time by EquipID")
+        fig_data = generate_gpt_insight_payload(fig)
+        insights = get_graph_insights(fig_data)
+        # Convert figure to JSON for rendering in web applications
         plots["Stacked CO₂ Emission Over Time by EquipID"] = make_serializable(fig.to_json())
+        #     {
+        #     'plot': make_serializable(fig.to_json()),
+        #     'insights': insights
+        # }
     except Exception as e:
         print(e)
 
@@ -2523,7 +2756,14 @@ def additional_plots(df):
 
         fig = px.scatter(df, x="Date", y="CO2 Emission - Actual", color="Anomaly",
                          title="Anomaly Detection on CO₂ Emissions")
+        # fig_data = generate_gpt_insight_payload(fig)
+        # insights = get_graph_insights(fig_data)
+        # Convert figure to JSON for rendering in web applications
         plots["Anomaly Detection on CO₂ Emissions"] = make_serializable(fig.to_json())
+        #     {
+        #     "plot": make_serializable(fig.to_json()),
+        #     'insights': insights
+        # }
     except Exception as e:
         print(e)
 
@@ -2804,7 +3044,7 @@ def arima_forecast(model, periods, freq, target_col, user_id):
 
 
 def check_data_frequency(train):
-    data_freq = {'D': 'Days', 'W': 'Weeks', "H": "Hours", "Q": "Quarters", 'A': 'Years'}
+    data_freq = {'D': 'Days', 'W': 'Weeks', "H": "Hours", "Q": "Quarters", 'A': 'Years', "M": "Months"}
     m = pd.infer_freq(train.index)
     if m in ['15T', '30T', "H", "D", "W", "M", "Q", "A"]:
         return data_freq[m]

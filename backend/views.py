@@ -1997,7 +1997,7 @@ def arima_train(data, target_col, user_id, bot_query=None):
             'hours': 'H',
             'days': 'D',
             'weeks': 'W',
-            'months': 'MS',
+            'months': 'M',
             'quarters': 'QS',
             'years': 'YS'
         }
@@ -2993,7 +2993,7 @@ def arima_forecast(model, periods, freq, target_col, user_id):
         'hours': 'H',
         'days': 'D',
         'weeks': 'W',
-        'months': 'MS',
+        'months': 'M',
         'quarters': 'QS',
         'years': 'YS'
     }
@@ -3002,7 +3002,10 @@ def arima_forecast(model, periods, freq, target_col, user_id):
 
     end_date = data.get('end_date')
     frequency = freq_map[data.get('data_freq').lower()]
-    start_date = pd.to_datetime(end_date) + pd.tseries.frequencies.to_offset(frequency)
+    try:
+        start_date = pd.to_datetime(end_date) + pd.tseries.frequencies.to_offset(frequency)
+    except Exception as e:
+        start_date = pd.to_datetime(end_date)
 
     future = pd.date_range(start=start_date, periods=periods, freq=freq)
     future = future.to_series().dt.date.tolist()
@@ -3044,12 +3047,13 @@ def arima_forecast(model, periods, freq, target_col, user_id):
 
 
 def check_data_frequency(train):
-    data_freq = {'D': 'Days', 'W': 'Weeks', "H": "Hours", "Q": "Quarters", 'A': 'Years', "M": "Months"}
+    data_freq = {'D': 'Days', 'W': 'Weeks', "H": "Hours", "Q": "Quarters", 'A': 'Years', "M": "Months", "MS": "Months",
+                 'A-JAN': 'Years'}
     m = pd.infer_freq(train.index)
-    if m in ['15T', '30T', "H", "D", "W", "M", "Q", "A"]:
+    if m in ['15T', '30T', "H", "D", "W", "M", "Q", "A", "MS", 'A-JAN']:
         return data_freq[m]
     else:
-        print('Unsupported frequency')
+        return 'Unsupported frequency'
 
 
 def summarize_csv(df):

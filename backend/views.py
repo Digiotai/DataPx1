@@ -122,8 +122,9 @@ def loginPage(request):
             try:
                 user_role = UserRole.objects.get(user_id=user.id)
                 organization = Organization.objects.get(id=user_role.organization.id)
+                tenant = Tenant.objects.get(id=organization.tenant_id)
             except Exception as e:
-                JsonResponse({"status": "error", "message": f"{e}"}, status=400)
+                return JsonResponse({"status": "error", "message": f"{e}"}, status=400)
             # Prepare the user details to return as a response
             user_details = {
                 'username': user.username,
@@ -131,8 +132,16 @@ def loginPage(request):
                 'id': user.id,
                 'last_login': user.last_login,
                 'role': user_role.role,
-                'tenant': organization.tenant_id,
-                'organization': user_role.organization.id
+                'tenant': {
+                    'tenant_id': tenant.id,
+                    'tenant_name': tenant.name,
+                    'tenant_type': tenant.type,
+                    'tenant_timeout': tenant.timeout
+                },
+                'organization': {
+                    'organization_id': organization.id,
+                    'organization_name': organization.name,
+                }
             }
 
             return JsonResponse({"status": "success", "user": user_details})
@@ -188,6 +197,7 @@ def create_tenants(request):
     if request.method == 'POST':
         t_name = request.POST.get('tenant_name')
         t_type = request.POST.get('tenant_type')
+        t_timeout = request.POST.get('timeout')
         try:
             if Tenant.objects.filter(name=t_name, type=t_type).exists():
                 return JsonResponse({
@@ -195,11 +205,12 @@ def create_tenants(request):
                     'message': f"Tenant with name '{t_name}' and type '{t_type}' already exists"
                 }, status=409)
 
-            tenant = Tenant.objects.create(name=t_name, type=t_type)
+            tenant = Tenant.objects.create(name=t_name, type=t_type, timeout=t_timeout)
             tenant_details = {
                 "Tenant id": tenant.id,
                 "Tenant Name": tenant.name,
-                "Tenant type": tenant.type
+                "Tenant type": tenant.type,
+                "Timeout": tenant.timeout
             }
             return JsonResponse({'status': 'created', 'tenant_details': tenant_details})
         except Exception as e:
@@ -216,7 +227,8 @@ def tenants(request, t_id=None):
                     tenant_details = {
                         "Tenant id": tenant.id,
                         "Tenant Name": tenant.name,
-                        "Tenant type": tenant.type
+                        "Tenant type": tenant.type,
+                        "Timeout": tenant.timeout
                     }
                     return JsonResponse({'status': 'Tenant Found', 'Tenant Details': tenant_details})
                 else:
@@ -224,13 +236,14 @@ def tenants(request, t_id=None):
             except Exception as e:
                 return JsonResponse({"status": "error", "message": str(e)}, status=400)
         else:
-            tenants = Tenant.objects.all().values('id', 'name', 'type')
+            tenants = Tenant.objects.all().values('id', 'name', 'type', 'timeout')
             return JsonResponse({'tenants': list(tenants)}, safe=False)
     elif request.method == 'POST':
         if not t_id:
             return HttpResponseBadRequest("Tenant ID required for update.")
         t_name = request.POST.get('tenant_name')
         t_type = request.POST.get('tenant_type')
+        t_timeout = request.POST.get('tenant_timeout')
         if t_id:
             try:
                 tenant = Tenant.objects.get(id=t_id)
@@ -239,6 +252,8 @@ def tenants(request, t_id=None):
 
                 if t_type:
                     tenant.type = t_type
+                if t_timeout:
+                    tenant.timeout = t_timeout
 
                 tenant.save()
 
@@ -246,7 +261,8 @@ def tenants(request, t_id=None):
                                      'Updated Detais': {
                                          "tenant_id": tenant.id,
                                          'tenant_name': tenant.name,
-                                         'tenant_type': tenant.type
+                                         'tenant_type': tenant.type,
+                                         'timeout': tenant.timeout
                                      }
                                      }, status=200)
 
@@ -662,76 +678,103 @@ def get_users(request, u_id=None):
         organization_id = request.GET.get('organization_id')
         user_role = request.GET.get('user_role')
         if u_id:
+            tenant_details = None
             try:
+                # Fetch user
                 user = get_object_or_404(User, id=u_id)
-                try:
-                    role = UserRole.objects.get(user_id=user.id)
-                except UserRole.DoesNotExist:
-                    role = None
+
+                # Try to get user role
+                role = UserRole.objects.select_related('organization').filter(user_id=user.id).first()
+
+                organization_details = None
+                tenant_details = None
+
+                if role and role.organization:
+                    org = role.organization
+                    organization_details = {
+                        'organization_id': org.id,
+                        'organization_name': org.name
+                    }
+
+                    # Try to get tenant
+                    try:
+                        tenant = Tenant.objects.get(id=org.tenant_id)
+                        tenant_details = {
+                            'tenant_id': tenant.id,
+                            'tenant_name': tenant.name,
+                            'tenant_type': tenant.type,
+                            'tenant_timeout': tenant.timeout
+                        }
+                    except Tenant.DoesNotExist:
+                        pass
 
                 data = {
                     "id": user.id,
                     "username": user.username,
                     "email": user.email,
                     "is_active": user.is_active,
-                    'role': role.role if role else role,
-                    'organization': role.organization_id
+                    'role': role.role if role else None,
+                    'tenant': tenant_details,
+                    'organization': organization_details
                 }
+
                 return JsonResponse(data)
+
             except Exception as e:
                 return JsonResponse({"status": "error", "message": str(e)}, status=400)
         elif organization_id or user_role:
-            if organization_id and user_role:
-                try:
-                    org = Organization.objects.get(id=organization_id)
-                    user_roles = UserRole.objects.filter(organization=org, role=user_role).select_related('user',
-                                                                                                          'organization')
-                    user_data = [
-                        {
-                            'id': ur.user.id,
-                            'username': ur.user.username,
-                            'email': ur.user.email,
-                            'role': ur.role,
-                            'organization': ur.organization.name  # or use ur.organization.id
-                        }
-                        for ur in user_roles
-                    ]
-                    return JsonResponse({'users': user_data}, safe=False)
-                except Exception as e:
-                    return JsonResponse({"status": "error", "message": str(e)}, status=400)
-            elif organization_id:
-                try:
-                    org = Organization.objects.get(id=organization_id)
-                    user_roles = UserRole.objects.filter(organization=org).select_related('user', 'organization')
-                    user_data = [
-                        {
-                            'id': ur.user.id,
-                            'username': ur.user.username,
-                            'email': ur.user.email,
-                            'role': ur.role,
-                            'organization': ur.organization.name  # or use ur.organization.id
-                        }
-                        for ur in user_roles
-                    ]
-                    return JsonResponse({'users': user_data}, safe=False)
-                except Exception as e:
-                    return JsonResponse({"status": "error", "message": str(e)}, status=400)
-            elif user_role:
-                try:
-                    user_roles = UserRole.objects.filter(role=user_role).select_related('user', 'organization')
-                    user_data = [
-                        {
-                            'id': ur.user.id,
-                            'username': ur.user.username,
-                            'email': ur.user.email,
-                            'role': ur.role,
-                            'organization': ur.organization.name  # or use ur.organization.id
-                        }
-                        for ur in user_roles
-                    ]
-                    return JsonResponse({'users': user_data}, safe=False)
-                except Exception as e:
-                    return JsonResponse({"status": "error", "message": str(e)}, status=400)
+            organization_id = request.GET.get('organization_id')
+            user_role = request.GET.get('user_role')
+
+            user_role = user_role if isinstance(user_role, list) else [user_role]
+
+            try:
+                filters = {}
+                if organization_id:
+                    filters['organization__id'] = organization_id
+                if user_role:
+                    filters['role'] = user_role
+
+                user_roles = UserRole.objects.filter(**filters).select_related('user', 'organization')
+
+                user_data = []
+                tenant_cache = {}
+
+                for ur in user_roles:
+                    org = ur.organization
+                    tenant = None
+
+                    if org:
+                        if org.tenant_id in tenant_cache:
+                            tenant = tenant_cache[org.tenant_id]
+                        else:
+                            try:
+                                tenant = Tenant.objects.get(id=org.tenant_id)
+                                tenant_cache[org.tenant_id] = tenant
+                            except Tenant.DoesNotExist:
+                                tenant = None
+
+                    user_data.append({
+                        'id': ur.user.id,
+                        'username': ur.user.username,
+                        'email': ur.user.email,
+                        'role': ur.role,
+                        'tenant': {
+                            'tenant_id': tenant.id,
+                            'tenant_name': tenant.name,
+                            'tenant_type': tenant.type,
+                            'tenant_timeout': tenant.timeout
+                        } if tenant else None,
+                        'organization': {
+                            'organization_id': org.id,
+                            'organization_name': org.name,
+                        } if org else None
+                    })
+
+                return JsonResponse({'users': user_data}, safe=False)
+
+            except Exception as e:
+                return JsonResponse({"status": "error", "message": str(e)}, status=400)
         else:
             try:
                 users = User.objects.all()
@@ -739,15 +782,31 @@ def get_users(request, u_id=None):
                 for user in users:
                     try:
                         user_role = UserRole.objects.get(user_id=user.id)
+                        organization = Organization.objects.get(id=user_role.organization.id)
+                        tenant = Tenant.objects.get(id=organization.tenant_id)
                     except UserRole.DoesNotExist:
                         user_role = None
+                        tenant = None
+                        organization = None
 
-                    user_data.append({"id": user.id,
-                                      "username": user.username,
-                                      "email": user.email,
-                                      "is_active": user.is_active,
-                                      'role': user_role.role if user_role else user_role,
-                                      'organization': user_role.organization_id if user_role else user_role})
+                    user_data.append({
+                        'username': user.username,
+                        'email': user.email,
+                        'id': user.id,
+                        'last_login': user.last_login,
+                        'role': user_role.role if user_role else user_role,
+                        'tenant': {
+                            'tenant_id': tenant.id,
+                            'tenant_name': tenant.name,
+                            'tenant_type': tenant.type,
+                            'tenant_timeout': tenant.timeout
+                        } if tenant else tenant,
+                        'organization': {
+                            'organization_id': organization.id,
+                            'organization_name': organization.name,
+                        } if organization else organization
+                    }
+                    )
                 return JsonResponse(user_data, safe=False)
             except Exception as e:
                 return JsonResponse({"status": "error", "message": str(e)}, status=400)
@@ -1425,7 +1484,6 @@ def models(request):
 
 
 def outliercheck(data, column):
-
     # Check if 'Target' column exists
     if column not in data.columns:
         raise ValueError("The column 'Target' does not exist in the CSV file.")
@@ -2196,7 +2254,7 @@ def plot_numeric(numeric_vars, dataframe):
         #     "plot":make_serializable(fig.to_json()),
         #     'insights':insights
         # }
-        plots[i] =make_serializable(fig.to_json())
+        plots[i] = make_serializable(fig.to_json())
 
     return plots
 
@@ -2275,6 +2333,7 @@ def plot_wordCloud(text_data, dataframe):
 
     return plots
 
+
 def get_graph_insights(data):
     system_prompt = """
             You are a data analyst AI assistant. When given a Plotly chart's metadata and data (such as title, type, axes, and data points), your job is to:
@@ -2289,7 +2348,8 @@ def get_graph_insights(data):
 
     """
     messages = [{"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Here is the chart data:\n```json\n{json.dumps(data, indent=2, default=str)}\n```"}]
+                {"role": "user",
+                 "content": f"Here is the chart data:\n```json\n{json.dumps(data, indent=2, default=str)}\n```"}]
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -2300,6 +2360,7 @@ def get_graph_insights(data):
 
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
 
 def generate_gpt_insight_payload(fig, fallback_title: str = "Chart"):
     """
@@ -2415,9 +2476,11 @@ def checkSentiment(df, categorical):
             sentiment = "Y"
     return sentiment
 
+
 def is_integer_like(series):
     return pd.api.types.is_numeric_dtype(series) and \
-           series.dropna().apply(lambda x: float(x).is_integer()).all()
+        series.dropna().apply(lambda x: float(x).is_integer()).all()
+
 
 def handle_missing_data(df):
     try:
@@ -2432,7 +2495,6 @@ def handle_missing_data(df):
 
         for col in ignored_cols:
             ignored_columns_info[col] = f"Ignored because of optional data"
-
 
         # Impute numeric columns and track which cells were imputed
         imputer = KNNImputer(n_neighbors=5)
@@ -2711,7 +2773,7 @@ def additional_plots(df):
         # fig_data = generate_gpt_insight_payload(fig)
         # insights = get_graph_insights(fig_data)
         # Convert figure to JSON for rendering in web applications
-        plots["Actual vs Target CO₂ Emissions"] =make_serializable(fig.to_json())
+        plots["Actual vs Target CO₂ Emissions"] = make_serializable(fig.to_json())
         #     {
         #     "plot": make_serializable(fig.to_json()),
         #     'insights': insights

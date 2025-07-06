@@ -28,9 +28,13 @@ class s3_crud:
     def check_s3_file(self, bucket_name, object_key):
         try:
             self.s3_client.head_object(Bucket=bucket_name, Key=object_key)
-            return True
+            return {"message": 'File Found', "status": True}
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == '404' or error_code == 'NoSuchKey':
+                return {"message": 'File Not Found', "status": False}
         except Exception as e:
-                return False
+                return {"message": str(e), "status": False}
 
     def upload_file_obj_to_s3(self, file_obj, bucket_name, object_name, file_format=None):
         if not self.check_s3_bucket(bucket_name):

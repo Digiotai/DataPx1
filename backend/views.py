@@ -1021,8 +1021,7 @@ def uploadFile(request):
             user_id = request.headers.get('X-User-ID')
             if not file:
                 return HttpResponse('No files uploaded')
-            aws_s3_obj.delete_s3_folder(s3_cred["credentials"]['base_bucket_name'], f'{user_id}/input_files')
-            aws_s3_obj.delete_s3_folder(s3_cred["credentials"]['base_bucket_name'], f'{user_id}/output/models')
+            aws_s3_obj.delete_s3_folder(s3_cred["credentials"]['base_bucket_name'], f'{user_id}')
             file_content = file.read()
             file.seek(0)
             try:
@@ -1057,7 +1056,7 @@ def process_file(user_id):
         user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
                                              f'{user_id}/input_files/file_properties.json', 'json')
         df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                      f'{user_id}/input_files/{user_file["file_name"]}', 'csv')
+                                      f'{user_id}/input_files/{user_file["file_name"]}.csv', 'csv')
 
         new_df, html_df, summary = process_missing_data(df.copy())
 

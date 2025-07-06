@@ -45,7 +45,7 @@ class s3_crud:
             if file_format == 'csv':
                 file_obj.to_csv(buffer, index=False)
             elif file_format == 'json':
-                buffer.write(json.dumps(file_obj).encode('utf-8'))
+                buffer.write(json.dumps(file_obj, default=str).encode('utf-8'))
             elif file_format == 'image':
                 # `file_obj` is expected to be a PIL.Image or a Django InMemoryUploadedFile
                 if isinstance(file_obj, Image.Image):

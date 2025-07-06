@@ -364,7 +364,7 @@ def organizations(request, o_id=None):
             try:
                 tenant = Tenant.objects.get(id=tenant_id)
             except Tenant.DoesNotExist:
-                tenant=None
+                tenant = None
             if tenant:
                 if Organization.objects.filter(tenant=tenant.id).exists():
                     orgs = []
@@ -373,12 +373,12 @@ def organizations(request, o_id=None):
                             'id': str(org.id),
                             'name': org.name,
                             'tenant': {
-                            "Tenant Id": tenant.id,
-                            "Tenant Name": tenant.name,
-                            "Tenant Type": tenant.type,
-                            "Tenant Timeout": tenant.timeout,
-                        },
-                            'parent': str(org.parent.id) if org.parent else None ,
+                                "Tenant Id": tenant.id,
+                                "Tenant Name": tenant.name,
+                                "Tenant Type": tenant.type,
+                                "Tenant Timeout": tenant.timeout,
+                            },
+                            'parent': str(org.parent.id) if org.parent else None,
                             'logo_name': org.image_name,
                             'logo_data': org.image_data
                         }
@@ -398,12 +398,12 @@ def organizations(request, o_id=None):
                     'id': str(org.id),
                     'name': org.name,
                     'tenant': {
-                            "Tenant Id": tenannt_obj.id,
-                            "Tenant Name": tenannt_obj.name,
-                            "Tenant Type": tenannt_obj.type,
-                            "Tenant Timeout": tenannt_obj.timeout,
-                        } if tenannt_obj else None,
-                    'parent':   str(org.parent.id) if org.parent else None,
+                        "Tenant Id": tenannt_obj.id,
+                        "Tenant Name": tenannt_obj.name,
+                        "Tenant Type": tenannt_obj.type,
+                        "Tenant Timeout": tenannt_obj.timeout,
+                    } if tenannt_obj else None,
+                    'parent': str(org.parent.id) if org.parent else None,
                     'logo_name': org.image_name,
                     'logo_data': org.image_data
                 }
@@ -448,7 +448,7 @@ def organizations(request, o_id=None):
                                                          f'Organizations/{organization.id}/{logo.name}', 'image')
 
                     except Exception as e:
-                        return JsonResponse({'message':str(e)}, status=400)
+                        return JsonResponse({'message': str(e)}, status=400)
                     logo_name = urllib.parse.quote_plus(logo.name, safe="()")
                     organization.image_data = f"https://aipriori-backend.s3.eu-west-1.amazonaws.com/Organizations/{organization.id}/{logo_name}"
                     organization.image_name = logo_name
@@ -1019,27 +1019,19 @@ def uploadFile(request):
             user_id = request.headers.get('X-User-ID')
             if not file:
                 return HttpResponse('No files uploaded')
-            file_content = file.read()
             aws_s3_obj.delete_s3_folder(s3_cred["credentials"]['base_bucket_name'], f'{user_id}/input_files')
             aws_s3_obj.delete_s3_folder(s3_cred["credentials"]['base_bucket_name'], f'{user_id}/output/models')
 
             try:
                 # Directly upload Django UploadedFile object to S3
-                aws_s3_obj.upload_file_obj_to_s3(io.BytesIO(file_content), s3_cred["credentials"]['base_bucket_name'],
+                aws_s3_obj.upload_file_obj_to_s3(file, s3_cred["credentials"]['base_bucket_name'],
                                                  f'{user_id}/input_files/{file.name}')
 
-                aws_s3_obj.upload_file_obj_to_s3({"last_updated_file": file.name},
+                aws_s3_obj.upload_file_obj_to_s3({'file_name': file.name.split(".")[0]},
                                                  s3_cred["credentials"]['base_bucket_name'],
-                                                 f'{user_id}/input_files/user_uploaded_file.json', 'json')
+                                                 f'{user_id}/processed_files/file_properties.json', 'json')
             except (BotoCoreError, ClientError) as e:
                 print(f'Failed to upload: {str(e)}')
-
-            file.seek(0)
-            df = pd.read_csv(io.BytesIO(file_content))
-            new_df, html_df, summary = process_missing_data(df.copy())
-
-            aws_s3_obj.upload_file_obj_to_s3(new_df, s3_cred["credentials"]['base_bucket_name'],
-                                             f'{user_id}/processed_files/processed_data.csv', 'csv')
 
             user_id = request.headers.get('X-User-id')
             # session = ChatSession.objects.create(user_id=user_id)
@@ -1050,17 +1042,24 @@ def uploadFile(request):
             # session.session_name = f"Uploaded: {file.name}"
             # session.save()
 
-            aws_s3_obj.upload_file_obj_to_s3({"data": html_df, "summary": summary},
-                                             s3_cred["credentials"]['base_bucket_name'],
-                                             f'{user_id}/processed_files/mvt_data.json', 'json')
-            aws_s3_obj.upload_file_obj_to_s3({'file_name': file.name.split(".")[0]},
-                                             s3_cred["credentials"]['base_bucket_name'],
-                                             f'{user_id}/processed_files/file_properties.json', 'json')
-
             return HttpResponse(json.dumps({'status': "Success", "data": df.to_json(), 'file_name': file.name}),
                                 content_type="application/json")
     except Exception as e:
         return HttpResponse(str(e))
+
+
+def process_file():
+    pass
+    # file.seek(0)
+    # df = pd.read_csv(io.BytesIO(file_content))
+    # new_df, html_df, summary = process_missing_data(df.copy())
+    #
+    # aws_s3_obj.upload_file_obj_to_s3(new_df, s3_cred["credentials"]['base_bucket_name'],
+    #                                  f'{user_id}/processed_files/processed_data.csv', 'csv')
+    #
+    # aws_s3_obj.upload_file_obj_to_s3({"data": html_df, "summary": summary},
+    #                                  s3_cred["credentials"]['base_bucket_name'],
+    #                                  f'{user_id}/processed_files/mvt_data.json', 'json')
 
 
 # Ensure JSON serialization by converting NumPy arrays to lists
@@ -1079,12 +1078,10 @@ def user_uploaded_file(request):
     try:
         user_id = request.headers.get('X-User-ID')
         user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                             f'{user_id}/input_files/user_uploaded_file.json', 'json')
-        return JsonResponse({"file_name": user_file.get('last_updated_file')})
-
+                                             f'{user_id}/processed_files/file_properties.json', 'json')
+        return JsonResponse({"file_name": user_file.get('file_name')})
     except Exception as e:
         return JsonResponse({"message": str(e)}, status=400)
-
 
 @csrf_exempt
 def gpt_graphical(request):

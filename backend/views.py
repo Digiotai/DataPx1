@@ -18,6 +18,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import pmdarima as pm
+import urllib.parse
 from django.contrib.auth import authenticate, login
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -285,6 +286,7 @@ def create_organizations(request):
             o_name = request.POST.get('organization_name')
             p_o_id = request.POST.get('parent_organization_id')
             logo = request.FILES.get('logo')
+
             if p_o_id in [None, 'null', '']:
                 p_o_id = None
             if Organization.objects.filter(name=o_name, tenant=t_id).filter(
@@ -292,13 +294,12 @@ def create_organizations(request):
                 tenant = Tenant.objects.get(id=t_id)
                 parent = Organization.objects.get(id=p_o_id) if p_o_id else None
                 org = Organization.objects.get(name=o_name, tenant=tenant, parent=parent)
-                image_base64 = base64.b64encode(org.image_data).decode('utf-8')
                 organization_details = {
                     "Organization id": org.id,
                     "Organization name": org.name,
                     "Tenant id": org.tenant.id,
                     "Parent id": org.parent,
-                    "logo_data": image_base64,
+                    "logo_data": org.image_data,
                     "logo_name": org.image_name
                 }
                 return JsonResponse({
@@ -306,17 +307,23 @@ def create_organizations(request):
                     'message': f'Organization with provided details exists already',
                     'Organizations details': organization_details
                 }, status=409)
+
             tenant = Tenant.objects.get(id=t_id)
             parent = Organization.objects.get(id=p_o_id) if p_o_id else None
-            org = Organization.objects.create(name=o_name, tenant=tenant, parent=parent, image_data=logo.read(),
-                                              image_name=logo.name)
-            image_base64 = base64.b64encode(org.image_data).decode('utf-8')
+            org = Organization.objects.create(name=o_name, tenant=tenant, parent=parent)
+            aws_s3_obj.upload_file_obj_to_s3(logo,
+                                             s3_cred["credentials"]['base_bucket_name'],
+                                             f'Organizations/{org.id}/{logo.name}', 'image')
+            logo_name = urllib.parse.quote_plus(logo.name, safe="()")
+            org.image_data = f"https://aipriori-backend.s3.eu-west-1.amazonaws.com/Organizations/{org.id}/{logo_name}"
+            org.image_name = logo_name
+            org.save()
             organization_details = {
                 "Organization id": org.id,
                 "Organization name": org.name,
                 "Tenant id": org.tenant.id,
                 "Parent id": org.parent,
-                "logo_data": image_base64,
+                "logo_data": org.image_data,
                 "logo_name": org.image_name
             }
             return JsonResponse({'status': 'created', 'organization_details': organization_details})
@@ -331,13 +338,21 @@ def organizations(request, o_id=None):
         if o_id:
             try:
                 org = Organization.objects.get(id=o_id)
+
+                tenannt_obj = Tenant.objects.get(id=org.tenant_id)
+
                 if org:
                     organization_details = {
                         "Organization id": org.id,
                         "Organization name": org.name,
-                        "Tenant id": org.tenant.id,
-                        "Parent id": org.parent,
-                        "logo_data": base64.b64encode(org.image_data).decode('utf-8') if org.image_data else None,
+                        "Tenant": {
+                            "Tenant Id": tenannt_obj.id,
+                            "Tenant Name": tenannt_obj.name,
+                            "Tenant Type": tenannt_obj.type,
+                            "Tenant Timeout": tenannt_obj.timeout,
+                        },
+                        "Parent Tenant": str(org.parent.id) if org.parent else None,
+                        "logo_data": org.image_data,
                         "logo_name": org.image_name
                     }
                     return JsonResponse({'status': 'Organization Found', 'Organization Details': organization_details})
@@ -346,7 +361,10 @@ def organizations(request, o_id=None):
             except Exception as e:
                 return JsonResponse({"status": "error", "message": str(e)}, status=400)
         elif tenant_id:
-            tenant = Tenant.objects.get(id=tenant_id)
+            try:
+                tenant = Tenant.objects.get(id=tenant_id)
+            except Tenant.DoesNotExist:
+                tenant=None
             if tenant:
                 if Organization.objects.filter(tenant=tenant.id).exists():
                     orgs = []
@@ -354,10 +372,15 @@ def organizations(request, o_id=None):
                         org_dict = {
                             'id': str(org.id),
                             'name': org.name,
-                            'tenant': str(org.tenant_id),
-                            'parent': str(org.parent_id) if org.parent else None,
+                            'tenant': {
+                            "Tenant Id": tenant.id,
+                            "Tenant Name": tenant.name,
+                            "Tenant Type": tenant.type,
+                            "Tenant Timeout": tenant.timeout,
+                        },
+                            'parent': str(org.parent.id) if org.parent else None ,
                             'logo_name': org.image_name,
-                            'logo_data': base64.b64encode(org.image_data).decode('utf-8') if org.image_data else None
+                            'logo_data': org.image_data
                         }
                         orgs.append(org_dict)
                     return JsonResponse({'organizations': orgs}, safe=False)
@@ -367,13 +390,22 @@ def organizations(request, o_id=None):
         else:
             orgs = []
             for org in Organization.objects.all():
+                try:
+                    tenannt_obj = Tenant.objects.get(id=org.tenant_id)
+                except Tenant.DoesNotExist:
+                    tenannt_obj = None
                 org_dict = {
                     'id': str(org.id),
                     'name': org.name,
-                    'tenant': str(org.tenant_id),
-                    'parent': str(org.parent_id) if org.parent else None,
+                    'tenant': {
+                            "Tenant Id": tenannt_obj.id,
+                            "Tenant Name": tenannt_obj.name,
+                            "Tenant Type": tenannt_obj.type,
+                            "Tenant Timeout": tenannt_obj.timeout,
+                        } if tenannt_obj else None,
+                    'parent':   str(org.parent.id) if org.parent else None,
                     'logo_name': org.image_name,
-                    'logo_data': base64.b64encode(org.image_data).decode('utf-8') if org.image_data else None
+                    'logo_data': org.image_data
                 }
                 orgs.append(org_dict)
             return JsonResponse({'organizations': orgs}, safe=False)
@@ -410,8 +442,16 @@ def organizations(request, o_id=None):
                             "message": f"Tenant with ID {tenant_id} does not exist."
                         }, status=400)
                 if logo:
-                    organization.image_data = logo.read()
-                    organization.image_name = logo.name
+                    try:
+                        aws_s3_obj.upload_file_obj_to_s3(logo,
+                                                         s3_cred["credentials"]['base_bucket_name'],
+                                                         f'Organizations/{organization.id}/{logo.name}', 'image')
+
+                    except Exception as e:
+                        return JsonResponse({'message':str(e)}, status=400)
+                    logo_name = urllib.parse.quote_plus(logo.name, safe="()")
+                    organization.image_data = f"https://aipriori-backend.s3.eu-west-1.amazonaws.com/Organizations/{organization.id}/{logo_name}"
+                    organization.image_name = logo_name
 
                 organization.save()
 
@@ -421,7 +461,7 @@ def organizations(request, o_id=None):
                                          'organization_name': organization.name,
                                          "tenant": organization.tenant.id,
                                          'parent': organization.parent.id if organization.parent else organization.parent,
-                                         "logo_data": base64.b64encode(organization.image_data).decode('utf-8'),
+                                         "logo_data": organization.image_data,
                                          "logo_name": organization.image_name
                                      }
                                      }, status=200)
@@ -987,6 +1027,10 @@ def uploadFile(request):
                 # Directly upload Django UploadedFile object to S3
                 aws_s3_obj.upload_file_obj_to_s3(io.BytesIO(file_content), s3_cred["credentials"]['base_bucket_name'],
                                                  f'{user_id}/input_files/{file.name}')
+
+                aws_s3_obj.upload_file_obj_to_s3({"last_updated_file": file.name},
+                                                 s3_cred["credentials"]['base_bucket_name'],
+                                                 f'{user_id}/input_files/user_uploaded_file.json', 'json')
             except (BotoCoreError, ClientError) as e:
                 print(f'Failed to upload: {str(e)}')
 
@@ -1028,6 +1072,18 @@ def make_serializable(obj):
     elif isinstance(obj, list):
         return [make_serializable(v) for v in obj]
     return obj
+
+
+@csrf_exempt
+def user_uploaded_file(request):
+    try:
+        user_id = request.headers.get('X-User-ID')
+        user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                             f'{user_id}/input_files/user_uploaded_file.json', 'json')
+        return JsonResponse({"file_name": user_file.get('last_updated_file')})
+
+    except Exception as e:
+        return JsonResponse({"message": str(e)}, status=400)
 
 
 @csrf_exempt

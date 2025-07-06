@@ -41,7 +41,7 @@ class Organization(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
     name = models.CharField(max_length=255)
     parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL)
-    image_data = models.BinaryField(null=True, blank=True, editable=True)
+    image_data = models.CharField(null=True, blank=True, editable=True)
     image_name = models.CharField(max_length=255, null=True, blank=True)
 
     def __str__(self):

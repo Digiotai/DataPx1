@@ -4,6 +4,7 @@ import pickle
 import json
 import io
 import pandas as pd
+from PIL import Image
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
 
 
@@ -41,6 +42,12 @@ class s3_crud:
                 file_obj.to_csv(buffer, index=False)
             elif file_format == 'json':
                 buffer.write(json.dumps(file_obj).encode('utf-8'))
+            elif file_format == 'image':
+                # `file_obj` is expected to be a PIL.Image or a Django InMemoryUploadedFile
+                if isinstance(file_obj, Image.Image):
+                    file_obj.save(buffer, format='PNG')  # or JPEG, etc.
+                else:
+                    buffer.write(file_obj.read())
             buffer.seek(0)
             file_obj = buffer
 

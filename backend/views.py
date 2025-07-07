@@ -1292,6 +1292,8 @@ def data_processing(request):
                     {'nof_rows': str(nor), 'nof_columns': str(nof), 'timestamp': timestamp,
                      "single_value_columns": ",".join(single_value_columns) if len(
                          single_value_columns) > 0 else "NA",
+                     'data': df[:100].to_json(),
+                    "data description":df.dtypes.apply(lambda x: 'string' if x == 'object' else x.name).to_dict(),
                      "sentiment": sentiment,
                      "stationary": stationary,
                      'catdf': catdf.to_json(orient='records'),

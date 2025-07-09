@@ -769,7 +769,7 @@ def get_users(request, u_id=None):
             organization_id = request.GET.get('organization_id')
             user_role = request.GET.get('user_role')
 
-            user_role = user_role if isinstance(user_role, list) else [user_role]
+            user_role = user_role if isinstance(user_role, list) else user_role
 
             try:
                 filters = {}

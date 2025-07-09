@@ -21,6 +21,7 @@ import pmdarima as pm
 import urllib.parse
 from django.contrib.auth import authenticate, login
 from django.shortcuts import get_object_or_404
+from django.db.models import Prefetch
 from django.contrib.auth.decorators import login_required
 from django.core.files.storage import default_storage
 # For genai using plotly
@@ -819,39 +820,46 @@ def get_users(request, u_id=None):
                 return JsonResponse({"status": "error", "message": str(e)}, status=400)
         else:
             try:
-                users = User.objects.all()
+                from django.db.models import Prefetch
+
+                # Prefetch related objects for efficiency
+                user_roles = UserRole.objects.select_related('organization__tenant')
+                users = User.objects.prefetch_related(
+                    Prefetch('userrole_set', queryset=user_roles, to_attr='user_roles')
+                )
+
                 user_data = []
                 for user in users:
-                    try:
-                        user_role = UserRole.objects.get(user_id=user.id)
-                        organization = Organization.objects.get(id=user_role.organization.id)
-                        tenant = Tenant.objects.get(id=organization.tenant_id)
-                    except UserRole.DoesNotExist:
-                        user_role = None
-                        tenant = None
-                        organization = None
+                    # If user has one or more roles, use the first one (or loop through if needed)
+                    user_role = user.user_roles[0] if user.user_roles else None
+                    organization = user_role.organization if user_role else None
+                    tenant = organization.tenant if organization else None
 
                     user_data.append({
                         'username': user.username,
                         'email': user.email,
                         'id': user.id,
                         'last_login': user.last_login,
-                        'role': user_role.role if user_role else user_role,
+                        'role': user_role.role if user_role else None,
                         'tenant': {
                             'tenant_id': tenant.id,
                             'tenant_name': tenant.name,
                             'tenant_type': tenant.type,
                             'tenant_timeout': tenant.timeout
-                        } if tenant else tenant,
+                        } if tenant else None,
                         'organization': {
                             'organization_id': organization.id,
                             'organization_name': organization.name,
-                        } if organization else organization
-                    }
-                    )
+                        } if organization else None
+                    })
+
                 return JsonResponse(user_data, safe=False)
+
             except Exception as e:
                 return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
+
+
 
     elif request.method == 'POST':
         if not u_id:

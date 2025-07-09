@@ -392,25 +392,25 @@ def organizations(request, o_id=None):
                                      'Message': "No organization found under specified tenant"})
         else:
             orgs = []
-            for org in Organization.objects.all():
-                try:
-                    tenannt_obj = Tenant.objects.get(id=org.tenant_id)
-                except Tenant.DoesNotExist:
-                    tenannt_obj = None
+            organizations = Organization.objects.select_related('tenant', 'parent').all()
+
+            for org in organizations:
+                tenant = org.tenant  # Already fetched with select_related
                 org_dict = {
                     'id': str(org.id),
                     'name': org.name,
                     'tenant': {
-                        "Tenant Id": tenannt_obj.id,
-                        "Tenant Name": tenannt_obj.name,
-                        "Tenant Type": tenannt_obj.type,
-                        "Tenant Timeout": tenannt_obj.timeout,
-                    } if tenannt_obj else None,
+                        "Tenant Id": tenant.id,
+                        "Tenant Name": tenant.name,
+                        "Tenant Type": tenant.type,
+                        "Tenant Timeout": tenant.timeout,
+                    } if tenant else None,
                     'parent': str(org.parent.id) if org.parent else None,
                     'logo_name': org.image_name,
                     'logo_data': org.image_data
                 }
                 orgs.append(org_dict)
+
             return JsonResponse({'organizations': orgs}, safe=False)
     elif request.method == 'POST':
         if not o_id:
@@ -820,9 +820,6 @@ def get_users(request, u_id=None):
                 return JsonResponse({"status": "error", "message": str(e)}, status=400)
         else:
             try:
-                from django.db.models import Prefetch
-
-                # Prefetch related objects for efficiency
                 user_roles = UserRole.objects.select_related('organization__tenant')
                 users = User.objects.prefetch_related(
                     Prefetch('userrole_set', queryset=user_roles, to_attr='user_roles')
@@ -830,7 +827,6 @@ def get_users(request, u_id=None):
 
                 user_data = []
                 for user in users:
-                    # If user has one or more roles, use the first one (or loop through if needed)
                     user_role = user.user_roles[0] if user.user_roles else None
                     organization = user_role.organization if user_role else None
                     tenant = organization.tenant if organization else None

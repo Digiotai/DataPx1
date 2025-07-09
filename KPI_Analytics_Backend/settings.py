@@ -77,6 +77,9 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'KPI_Analytics_Backend.wsgi.application'
 
+# Max size in bytes (e.g., 100MB = 100 * 1024 * 1024)
+DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # For request body size
+FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # For file uploads in memory
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases

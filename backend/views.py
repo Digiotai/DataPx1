@@ -1007,8 +1007,7 @@ def process_response(response_data):
         message = choice.message
         chunk_message = message.content if message else ''
         processed_data += chunk_message
-    processed_data = processed_data.lower().replace('```python', '').replace('```', '')
-    print(processed_data)
+    processed_data = processed_data.replace('```python', '').replace('```', '')
     return processed_data
 
 
@@ -1074,8 +1073,10 @@ def process_file(user_id):
     except Exception as e:
         return {'message': str(e), "status": False}
 
-
 def check_processed_file(user_id):
+    user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                         f'{user_id}/input_files/file_properties.json', 'json')
+
     check_s3_file_obj = aws_s3_obj.check_s3_file(s3_cred["credentials"]['base_bucket_name'],
                                                  f'{user_id}/processed_files/processed_data.csv')
     if not check_s3_file_obj['status']:
@@ -1233,6 +1234,9 @@ def data_processing(request):
         if process_file_stat['status']:
             df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
                                           f'{user_id}/processed_files/processed_data.csv', 'csv')
+            user_dir = os.path.join(settings.MEDIA_ROOT, 'temp_uploads', f"user_{user_id}")
+            file_path = os.path.join(user_dir, 'data.csv')
+            df.to_csv(file_path, index=False)
             df = updatedtypes(df)
             if df.shape[0] > 0:
                 nullvalues = df.isnull().sum().to_dict()
@@ -1319,57 +1323,123 @@ def data_processing(request):
 def gen_graphs(request):
     try:
         user_id = request.headers.get('X-User-ID')
-        categorical_vars = []
-        boolean_vars = []
-        numeric_vars = {}
-        datetime_vars = []
-        additionalplots = ''
         process_file_stat = check_processed_file(user_id)
+        num_plots = 6
+        num_rows = request.headers.get('num_of_rows')
+        num_rows = int(num_rows) if num_rows else 100
         if process_file_stat['status']:
             df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
                                           f'{user_id}/processed_files/processed_data.csv', 'csv')
+            user_dir = os.path.join(settings.MEDIA_ROOT, 'temp_uploads', f"user_{user_id}")
+            file_path = os.path.join(user_dir, 'plot_data.csv')
             df = updatedtypes(df)
-            file_properties = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                                       f'{user_id}/input_files/file_properties.json', 'json')
-
-            single_value_columns = [col for col in df.columns if df[col].nunique() == 1]
-            df.drop(single_value_columns, axis=1, inplace=True)
-            for i, j in df.dtypes.items():
-                if str(j) in ["float64", "int64"]:
-                    data = df[i].describe().to_dict()
-                    numeric_vars[i] = data
-                elif str(j) in ["object"] and i not in ['Remark']:
-                    categorical_vars.append({i: df[i].nunique()})
-                elif str(j) in ["datetime64[ns]"]:
-                    if i.upper() in ['DATE', "TIME", "DATE_TIME"]:
-                        td = i
-                    datetime_vars.append(i)
-                elif str(j) in ["bool"]:
-                    boolean_vars.append(i)
-            for d in ['bar', 'pie', 'wordCloud']:
-                if os.path.exists(os.path.join(os.getcwd(), f'static/plots/{d}/')):
-                    for f in os.listdir(os.path.join(os.getcwd(), f'static/plots/{d}/')):
-                        os.remove(os.path.join(os.path.join(os.getcwd(), f'static/plots/{d}/'), f))
-                else:
-                    os.makedirs(os.path.join(os.getcwd(), f'static/plots/{d}/'), exist_ok=True)
-
-            barplots = plot_numeric(numeric_vars, df)
-
-            pieplots = plot_categorical(categorical_vars, df)
-
-            if "co2" in file_properties['file_name'].lower():
-                additionalplots = additional_plots(df)
-
-            # wordColudPlots = plot_wordCloud(text_data, df)
-            return JsonResponse({'barplots': barplots,
-                                 'pieplots': pieplots,
-                                 "additionalplots": additionalplots
-                                 })
+            df = df.iloc[:num_rows]
+            df.to_csv(file_path, index=False)
+            plots_path = os.path.join(user_dir, 'plots')
+            shutil.rmtree(plots_path, ignore_errors=True)
+            os.makedirs(plots_path)
+            sample_data = df.head(6)
+            data_types_info = df.dtypes.to_string()
+            result = {}
+            while len(result) != num_plots:
+                res = generate_dynamic_plots(file_path, plots_path, sample_data, data_types_info, num_plots - len(result))
+                if res:
+                    result.update(res)
+            return JsonResponse({"status": "Success", "plots": result})
         else:
             return JsonResponse({"message": process_file_stat['message']})
     except Exception as e:
         print(e)
+        return JsonResponse({"message": str(e)})
 
+
+def generate_dynamic_plots(file_path, plots_path, sample_data, data_types_info, num_plots):
+    # e. Saves the plot image to `{plots_path}` with the title as the filename (use `fig.write_image()`) save in both png  and html.
+    prompt = f"""
+                You are a data visualization expert and a Python Plotly developer.
+
+                I will provide you with a sample dataset.
+
+                Your task is to:
+                1. Analyze the dataset and identify the top {num_plots} most insightful charts (e.g., trends, distributions, correlations, anomalies).
+                2. Consider the data source as: {file_path}
+                3. For each chart:
+                   - Use a short, meaningful chart title (as the dictionary key).
+                   - Write a brief insight about the chart as a Python comment (`# insight: ...`).
+                   - Generate clean Python code that:
+                     a. Creates the Plotly chart using the dataset,
+                     b. Converts the figure to JSON using `fig.to_json()`,
+                     c. Saves it in a dictionary using `chart_dict[<chart_title>] = {{'plot_data': ..., 'description': ...}}`
+                     d. Wraps the chart generation and JSON conversion in a `try-except` block using `except Exception as e:` (capital E).
+                     
+
+                Instructions:
+                - Return **only valid Python code**. Do **not** use markdown or bullet points.
+                - Begin with any required imports and initialization of `chart_dict`.
+                - - Do not use `except exception as e:`. It is incorrect Python. Always use `except Exception as e:` (capital E). Any other form is invalid and will cause a runtime error.
+                - All explanations must be in valid Python comments (`# ...`)
+                - Do not add any extra text outside Python code.
+                - Use a diverse range of charts like: `line`, `bar`, `scatter`, `pie`, `box`, `heatmap`, `area`, `violin`, `Scatter3d`, `facet`, or animated plots.
+                - Use **aggregations** like `.groupby(...).mean()`, `.count()`, `.sum()` where helpful.
+                - - Apply **filters** when helpful, such as:
+                  - Top N categories by value or count,
+                  - Recent date ranges,
+                  - Removal of nulls or extreme outliers.
+                  - Top 5 categories by frequency or value
+
+                - Explore **advanced Plotly features**, such as:
+                  - `facet_row`, `facet_col` for comparison grids,
+                  - multi-series (e.g. line or scatter with `color`=column),
+                  - combo charts (e.g., bar + line together),
+                  - rolling averages or moving means,
+                  - violin plots to show distributions,
+                  - 3D scatter plots (`px.scatter_3d`) where 3 numeric dimensions exist,
+                  - animations (`animation_frame`, `animation_group`) if time-based trends are useful.
+                - Aim for **high-value insights**, like:
+                  - Seasonality or cyclic patterns,
+                  - Equipment performing worse than average,
+                  - Category-wise contribution to deficit or emissions,
+                  - Any shocking anomalies or unexpected gaps.
+
+                - Use this preview of the dataset:
+                    {sample_data}
+
+                - Column names and data types:
+                    {data_types_info}
+
+                IMPORTANT:
+                    - If you ever write `except exception as e`, your answer is wrong and must be corrected before use.
+                    - Ensure column names are used **exactly** as they appear in the dataset. **Do not change the case** or formatting of column names.
+                    - Always use `df.columns = df.columns.str.strip()` after loading the dataset to handle unwanted spaces.
+                    - After reading the CSV:
+                    - Use `df.columns = df.columns.str.strip()` to remove leading/trailing spaces from column names.
+                    - For datetime columns:
+                        - Strip values using `df[col] = df[col].astype(str).str.strip()`
+                        - Convert to datetime using `pd.to_datetime(df[col], errors='coerce', utc=True)`
+                        - Drop rows where datetime conversion failed using `df.dropna(subset=[col], inplace=True)`
+                    - Before using `.dt`, ensure the column is of datetime type using `pd.to_datetime()`.
+                """
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    processed_data = process_response(response)
+    processed_data = re.sub(r'except\s+exception\s+as\s+e', 'except Exception as e', processed_data)
+    print(processed_data)
+
+    result = {}
+    namespace = {}
+
+    try:
+        exec(processed_data, namespace)
+    except Exception as e:
+        print(e)
+
+    return namespace.get('chart_dict')
 
 @csrf_exempt
 def kpi_prompt(request):

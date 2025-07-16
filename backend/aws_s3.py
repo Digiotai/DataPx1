@@ -105,6 +105,18 @@ class s3_crud:
         elif file_format == 'pkl':
             return pickle.load(buffer)
 
+    def list_s3_files(self, bucket, prefix):
+        try:
+            response = self.s3_client.list_objects_v2(
+                Bucket=bucket,
+                Prefix=prefix,
+                Delimiter='/'
+            )
+            folders = [cp['Prefix'].split('/')[-2] for cp in response.get('CommonPrefixes', [])]
+            return {"status_code": 200, "files": folders}
+        except Exception as e:
+            return {"status_code": 500, "error": str(e)}
+
     def delete_s3_folder(self, bucket_name, folder_prefix):
         try:
             bucket = self.s3_resource.Bucket(bucket_name)

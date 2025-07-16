@@ -1021,20 +1021,40 @@ def uploadFile(request):
     try:
         if request.method == 'POST':
             file = request.FILES.get('file')
+            file_status = request.POST.get('file_status')
             user_id = request.headers.get('X-User-ID')
             if not file:
                 return HttpResponse('No files uploaded')
-            aws_s3_obj.delete_s3_folder(s3_cred["credentials"]['base_bucket_name'], f'{user_id}')
-            file_content = file.read()
+            file_name, file_extension = os.path.splitext(os.path.basename(file.name))
+            if file_name in aws_s3_obj.list_s3_files(s3_cred["credentials"]['base_bucket_name'],
+                                                     f"{user_id}/")["files"] and file_status not in ['replace',
+                                                                                                    'rename']:
+                return JsonResponse({"message": "Please select the file upload status to continue"})
+
+            if file_status:
+                if file_status.lower() == 'replace':
+                    aws_s3_obj.delete_s3_folder(s3_cred["credentials"]['base_bucket_name'],
+                                                f'{user_id}/{file_name}')
+                elif file_status.lower() == 'rename':
+                    existing_files = aws_s3_obj.list_s3_files(s3_cred["credentials"]['base_bucket_name'],
+                                             f"{user_id}/")["files"]
+                    match = re.match(r"^(.*)_V_\d+$", file_name)
+                    base_name = match.group(1) if match else file_name
+                    file_name = base_name[:]
+                    count = 1
+                    while file_name in existing_files:
+                        file_name = base_name + f"_V_{count}"
+                        count+=1
+
             file.seek(0)
             try:
                 # Directly upload Django UploadedFile object to S3
                 aws_s3_obj.upload_file_obj_to_s3(file, s3_cred["credentials"]['base_bucket_name'],
-                                                 f'{user_id}/input_files/{file.name}')
+                                                 f'{user_id}/{file_name}/input_files/{file_name}.{file_extension}')
 
-                aws_s3_obj.upload_file_obj_to_s3({'file_name': file.name.split(".")[0]},
+                aws_s3_obj.upload_file_obj_to_s3({'file_name': file_name},
                                                  s3_cred["credentials"]['base_bucket_name'],
-                                                 f'{user_id}/input_files/file_properties.json', 'json')
+                                                 f'{user_id}/file_properties.json', 'json')
             except (BotoCoreError, ClientError) as e:
                 print(f'Failed to upload: {str(e)}')
 
@@ -1048,10 +1068,32 @@ def uploadFile(request):
             # session.session_name = f"Uploaded: {file.name}"
             # session.save()
 
-            return HttpResponse(json.dumps({'status': "Success", 'file_name': file.name}),
+            return HttpResponse(json.dumps({'status': "Success", 'file_name': file_name+file_extension}),
                                 content_type="application/json")
     except Exception as e:
         return HttpResponse(str(e))
+
+
+@csrf_exempt
+def check_input_file(request):
+    file_name = request.POST.get('file_name')
+    user_id = request.headers.get('X-User-ID')
+    file_status = aws_s3_obj.check_s3_file(s3_cred["credentials"]['base_bucket_name'],
+                                           f'{user_id}/{file_name.split(".")[0]}/input_files/{file_name}')
+    if file_status['status']:
+        return JsonResponse({"message": "File exists", "status": True})
+    else:
+        return JsonResponse({"message": "File doest not exists", "status": False})
+
+
+@csrf_exempt
+def get_s3_files(request):
+    user_id = request.headers.get('X-User-ID')
+    result = aws_s3_obj.list_s3_files(s3_cred["credentials"]['base_bucket_name'], f"{user_id}/")
+    if result["status_code"] == 200:
+        return JsonResponse({"message": "FilesRetrieved", "available_files": result['files'], "status": True})
+    else:
+        return JsonResponse({"message": f"Error in retrieving fies: {result['error']}", "status": False})
 
 
 def process_file(user_id):
@@ -1072,6 +1114,7 @@ def process_file(user_id):
         return {'message': "File processed", "status": True}
     except Exception as e:
         return {'message': str(e), "status": False}
+
 
 def check_processed_file(user_id):
     user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
@@ -1301,7 +1344,7 @@ def data_processing(request):
                      "single_value_columns": ",".join(single_value_columns) if len(
                          single_value_columns) > 0 else "NA",
                      'data': df[:100].to_json(),
-                    "data description":df.dtypes.apply(lambda x: 'string' if x == 'object' else x.name).to_dict(),
+                     "data description": df.dtypes.apply(lambda x: 'string' if x == 'object' else x.name).to_dict(),
                      "sentiment": sentiment,
                      "stationary": stationary,
                      'catdf': catdf.to_json(orient='records'),
@@ -1342,7 +1385,8 @@ def gen_graphs(request):
             data_types_info = df.dtypes.to_string()
             result = {}
             while len(result) != num_plots:
-                res = generate_dynamic_plots(file_path, plots_path, sample_data, data_types_info, num_plots - len(result))
+                res = generate_dynamic_plots(file_path, plots_path, sample_data, data_types_info,
+                                             num_plots - len(result))
                 if res:
                     result.update(res)
             return JsonResponse({"status": "Success", "plots": result})
@@ -1440,6 +1484,7 @@ def generate_dynamic_plots(file_path, plots_path, sample_data, data_types_info, 
         print(e)
 
     return namespace.get('chart_dict')
+
 
 @csrf_exempt
 def kpi_prompt(request):

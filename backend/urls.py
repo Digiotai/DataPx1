@@ -28,7 +28,9 @@ urlpatterns = [
 
     path('api/gptresponse/', gpt_response, name='gptresponse'),
     path('api/gpt_graphical/', gpt_graphical, name='gpt_graphical'),
+    path('api/check_input_file_s3/', check_input_file, name='check_input_file'),
     path('api/file_upload/', uploadFile, name='file_upload'),
+    path('api/get_s3_files/', get_s3_files, name='get_s3_files'),
     path('api/get_file_name/', user_uploaded_file, name='get_file_name'),
     path('api/dataprocess', data_processing, name='data_process'),
     path('api/get_plots', gen_graphs, name='gen_graphs'),

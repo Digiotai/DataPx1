@@ -1145,6 +1145,20 @@ def user_uploaded_file(request):
     except Exception as e:
         return JsonResponse({"message": str(e)}, status=400)
 
+@csrf_exempt
+def update_user_selected_file(request):
+    try:
+        user_id = request.headers.get('X-User-ID')
+        user_selected_file = request.POST.get('file_name')
+        if not user_selected_file:
+            return JsonResponse({"message":"Please select the fileto continue"})
+        aws_s3_obj.upload_file_obj_to_s3({'file_name': user_selected_file},
+                                         s3_cred["credentials"]['base_bucket_name'],
+                                         f'{user_id}/file_properties.json', 'json')
+        return JsonResponse({"file_name": user_selected_file})
+    except Exception as e:
+        return JsonResponse({"message": str(e)}, status=400)
+
 
 @csrf_exempt
 def gpt_graphical(request):

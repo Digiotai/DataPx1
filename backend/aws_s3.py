@@ -3,6 +3,7 @@ import boto3
 import pickle
 import json
 import io
+import os
 import pandas as pd
 from PIL import Image
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
@@ -32,7 +33,7 @@ class s3_crud:
         except ClientError as e:
             error_code = e.response['Error']['Code']
             if error_code == '404' or error_code == 'NoSuchKey':
-                return {"message": 'File Not Found', "status": False}
+                return {"message": f'File Not Found', "status": False}
         except Exception as e:
                 return {"message": str(e), "status": False}
 
@@ -119,24 +120,20 @@ class s3_crud:
 
     def delete_s3_folder(self, bucket_name, folder_prefix):
         try:
-            bucket = self.s3_resource.Bucket(bucket_name)
+            folder_prefix = os.path.splitext(folder_prefix)[0] + "/"  # → 'user123/myfile/'
 
-            # Delete all objects under the prefix
-            response = bucket.objects.filter(Prefix=folder_prefix).delete()
+            # 1. Delete all files under the folder (e.g., 'user123/myfile/')
+            objects_to_delete = self.s3_resource.Bucket(bucket_name).objects.filter(Prefix=folder_prefix)
+            delete_response = objects_to_delete.delete()
 
-            # Handle empty folder (no objects found case)
-            if not response or (isinstance(response, list) and not response[0].get('Deleted')):
-                print(f"No files found under folder '{folder_prefix}'.")
-
-            # Delete potential folder marker object
+            # Delete base file (exact match, e.g., myfile.csv)
             try:
-                self.s3_client.delete_object(Bucket=bucket_name, Key=folder_prefix.rstrip('/') + '/')
+                self.s3_client.delete_object(Bucket=bucket_name, Key=folder_prefix)
             except self.s3_client.exceptions.NoSuchKey:
-                print("No folder marker object found.")
-            except Exception as e:
-                print("Folder marker delete failed:", e)
+                print(f"No base file found: {folder_prefix}")
 
-            print(f"Folder '{folder_prefix}' deleted successfully.")
+            print(f"Deleted base file and folder for '{file_name}' successfully.")
+
 
         except self.s3_client.exceptions.NoSuchBucket:
             print(f"Bucket '{bucket_name}' does not exist.")

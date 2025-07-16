@@ -1050,7 +1050,7 @@ def uploadFile(request):
             try:
                 # Directly upload Django UploadedFile object to S3
                 aws_s3_obj.upload_file_obj_to_s3(file, s3_cred["credentials"]['base_bucket_name'],
-                                                 f'{user_id}/{file_name}/input_files/{file_name}.{file_extension}')
+                                                 f'{user_id}/{file_name}/input_files/{file_name}{file_extension}')
 
                 aws_s3_obj.upload_file_obj_to_s3({'file_name': file_name},
                                                  s3_cred["credentials"]['base_bucket_name'],
@@ -1083,7 +1083,7 @@ def check_input_file(request):
     if file_status['status']:
         return JsonResponse({"message": "File exists", "status": True})
     else:
-        return JsonResponse({"message": "File doest not exists", "status": False})
+        return JsonResponse({"message": f"File doest not exists: {file_status['message']}", "status": False})
 
 
 @csrf_exempt

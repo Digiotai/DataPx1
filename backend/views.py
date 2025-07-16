@@ -1155,7 +1155,7 @@ def update_user_selected_file(request):
         aws_s3_obj.upload_file_obj_to_s3({'file_name': user_selected_file},
                                          s3_cred["credentials"]['base_bucket_name'],
                                          f'{user_id}/file_properties.json', 'json')
-        return JsonResponse({"file_name": user_selected_file})
+        return JsonResponse({"file_name": user_selected_file, "status": "success"})
     except Exception as e:
         return JsonResponse({"message": str(e)}, status=400)
 

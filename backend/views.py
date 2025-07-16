@@ -1099,29 +1099,26 @@ def get_s3_files(request):
 def process_file(user_id):
     try:
         user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                             f'{user_id}/input_files/file_properties.json', 'json')
+                                             f'{user_id}/file_properties.json', 'json')
         df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                      f'{user_id}/input_files/{user_file["file_name"]}.csv', 'csv')
+                                      f'{user_id}/{user_file["file_name"]}/input_files/{user_file["file_name"]}.csv', 'csv')
 
         new_df, html_df, summary = process_missing_data(df.copy())
 
         aws_s3_obj.upload_file_obj_to_s3(new_df, s3_cred["credentials"]['base_bucket_name'],
-                                         f'{user_id}/processed_files/processed_data.csv', 'csv')
+                                         f'{user_id}/{user_file["file_name"]}/processed_files/processed_data.csv', 'csv')
 
         aws_s3_obj.upload_file_obj_to_s3({"data": html_df, "summary": summary},
                                          s3_cred["credentials"]['base_bucket_name'],
-                                         f'{user_id}/processed_files/mvt_data.json', 'json')
+                                         f'{user_id}/{user_file["file_name"]}/processed_files/mvt_data.json', 'json')
         return {'message': "File processed", "status": True}
     except Exception as e:
         return {'message': str(e), "status": False}
 
 
-def check_processed_file(user_id):
-    user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                         f'{user_id}/input_files/file_properties.json', 'json')
-
+def check_processed_file(user_id, user_file):
     check_s3_file_obj = aws_s3_obj.check_s3_file(s3_cred["credentials"]['base_bucket_name'],
-                                                 f'{user_id}/processed_files/processed_data.csv')
+                                                 f'{user_id}/{user_file["file_name"]}/processed_files/processed_data.csv')
     if not check_s3_file_obj['status']:
         return process_file(user_id)
     return {'message': "File processed", "status": True}
@@ -1143,7 +1140,7 @@ def user_uploaded_file(request):
     try:
         user_id = request.headers.get('X-User-ID')
         user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                             f'{user_id}/input_files/file_properties.json', 'json')
+                                             f'{user_id}/file_properties.json', 'json')
         return JsonResponse({"file_name": user_file.get('file_name')})
     except Exception as e:
         return JsonResponse({"message": str(e)}, status=400)
@@ -1155,11 +1152,13 @@ def gpt_graphical(request):
         try:
             # Load CSV
             user_id = request.headers.get('X-User-ID')
-            process_file_stat = check_processed_file(user_id)
+            user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                                 f'{user_id}/file_properties.json', 'json')
+            process_file_stat = check_processed_file(user_id, user_file)
             if not process_file_stat['status']:
                 return JsonResponse({"message": process_file_stat["message"]})
             df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                          f'{user_id}/processed_files/processed_data.csv', 'csv')
+                                          f'{user_id}/{user_file["file_name"]}/processed_files/processed_data.csv', 'csv')
 
             # Generate CSV metadata
             csv_metadata = {"columns": df.columns.tolist()}
@@ -1273,10 +1272,12 @@ def generate_code(prompt_eng):
 def data_processing(request):
     user_id = request.headers.get('X-User-ID')
     if request.method == 'GET':
-        process_file_stat = check_processed_file(user_id)
+        user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                             f'{user_id}/file_properties.json', 'json')
+        process_file_stat = check_processed_file(user_id, user_file)
         if process_file_stat['status']:
             df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                          f'{user_id}/processed_files/processed_data.csv', 'csv')
+                                          f'{user_id}/{user_file["file_name"]}/processed_files/processed_data.csv', 'csv')
             user_dir = os.path.join(settings.MEDIA_ROOT, 'temp_uploads', f"user_{user_id}")
             file_path = os.path.join(user_dir, 'data.csv')
             df.to_csv(file_path, index=False)
@@ -1338,12 +1339,14 @@ def data_processing(request):
                 missingvalue = pd.DataFrame({"Parameters": parameters, 'Missing Value Count': Count})
 
                 duplicate_records = df[df.duplicated(keep='first')].shape[0]
+                df[datetime_vars] = df[datetime_vars].apply(pd.to_datetime, errors='coerce').apply(
+                    lambda col: col.dt.strftime('%Y-%m-%d %H:%M:%S'))
 
                 return JsonResponse(
                     {'nof_rows': str(nor), 'nof_columns': str(nof), 'timestamp': timestamp,
                      "single_value_columns": ",".join(single_value_columns) if len(
                          single_value_columns) > 0 else "NA",
-                     'data': df[:100].to_json(),
+                     'data': df.iloc[:100].to_json(),
                      "data description": df.dtypes.apply(lambda x: 'string' if x == 'object' else x.name).to_dict(),
                      "sentiment": sentiment,
                      "stationary": stationary,
@@ -1366,13 +1369,15 @@ def data_processing(request):
 def gen_graphs(request):
     try:
         user_id = request.headers.get('X-User-ID')
-        process_file_stat = check_processed_file(user_id)
+        user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                             f'{user_id}/file_properties.json', 'json')
+        process_file_stat = check_processed_file(user_id, user_file)
         num_plots = 6
         num_rows = request.headers.get('num_of_rows')
         num_rows = int(num_rows) if num_rows else 100
         if process_file_stat['status']:
             df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                          f'{user_id}/processed_files/processed_data.csv', 'csv')
+                                          f'{user_id}/{user_file["file_name"]}/processed_files/processed_data.csv', 'csv')
             user_dir = os.path.join(settings.MEDIA_ROOT, 'temp_uploads', f"user_{user_id}")
             file_path = os.path.join(user_dir, 'plot_data.csv')
             df = updatedtypes(df)
@@ -1495,8 +1500,9 @@ def kpi_prompt(request):
             KPI_LOGICS = defaultdict()
             checks = []
             prompt = request.POST.get('prompt')
-
-            process_file_stat = check_processed_file(user_id)
+            user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                                 f'{user_id}/file_properties.json', 'json')
+            process_file_stat = check_processed_file(user_id, user_file)
             if not process_file_stat['status']:
                 return JsonResponse({"message": process_file_stat["message"]})
             else:
@@ -1505,12 +1511,14 @@ def kpi_prompt(request):
                     shutil.rmtree(user_dir)
                 os.makedirs(user_dir, exist_ok=True)
                 file_path = os.path.join(user_dir, 'data.csv')
-                process_file_stat = check_processed_file(user_id)
+                user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                                     f'{user_id}/{user_file["file_name"]}/input_files/file_properties.json', 'json')
+                process_file_stat = check_processed_file(user_id, user_file)
                 if not process_file_stat['status']:
                     return JsonResponse({"message": process_file_stat['message']})
 
                 df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                              f'{user_id}/processed_files/processed_data.csv', 'csv')
+                                              f'{user_id}/{user_file["file_name"]}/processed_files/processed_data.csv', 'csv')
                 df.to_csv(file_path, index=False)
 
                 prompt_desc = (
@@ -1562,11 +1570,12 @@ def kpi_prompt(request):
 @csrf_exempt
 def mvt(request):
     user_id = request.headers.get('X-User-ID')
-
-    process_file_stat = check_processed_file(user_id)
+    user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                         f'{user_id}/file_properties.json', 'json')
+    process_file_stat = check_processed_file(user_id, user_file)
     if process_file_stat['status']:
         data = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                        f'{user_id}/processed_files/mvt_data.json', 'json')
+                                        f'{user_id}/{user_file["file_name"]}/processed_files/mvt_data.json', 'json')
         return JsonResponse(
             {
                 "df": data['data'],
@@ -1604,7 +1613,9 @@ def kpi_code(request):
 def models(request):
     try:
         user_id = request.headers.get('X-User-ID')
-        process_file_stat = check_processed_file(user_id)
+        user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                             f'{user_id}/file_properties.json', 'json')
+        process_file_stat = check_processed_file(user_id, user_file)
         if not process_file_stat['status']:
             return JsonResponse({"message": process_file_stat["message"]})
         user_dir = os.path.join(settings.MEDIA_ROOT, 'temp_uploads', f"user_{user_id}")
@@ -1614,7 +1625,7 @@ def models(request):
         file_path = os.path.join(user_dir, 'data.csv')
 
         df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                      f'{user_id}/processed_files/processed_data.csv', 'csv')
+                                      f'{user_id}/{user_file["file_name"]}/processed_files/processed_data.csv', 'csv')
         df.to_csv(file_path, index=False)
         single_value_columns = [col for col in df.columns if df[col].nunique() == 1]
         df.drop(single_value_columns, axis=1, inplace=True)
@@ -1833,8 +1844,10 @@ def model_predict(request):
                 res.update({col: request.POST[col]})
             del res['form_name']
             df = pd.DataFrame([res])
+            user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                                 f'{user_id}/file_properties.json', 'json')
             pipeline = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                                f'{user_id}/output/models/rf/{targetcol}/pipeline.pkl', 'pkl')
+                                                f'{user_id}/{user_file["file_name"]}/output/models/rf/{targetcol}/pipeline.pkl', 'pkl')
             predictions = pipeline.predict(df)
             print(predictions)
             return JsonResponse(
@@ -1868,13 +1881,14 @@ def gen_ai_bot(request):
             shutil.rmtree(user_dir)
         os.makedirs(user_dir, exist_ok=True)
         file_path = os.path.join(user_dir, 'data.csv')
-
-        process_file_stat = check_processed_file(user_id)
+        user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                             f'{user_id}/file_properties.json', 'json')
+        process_file_stat = check_processed_file(user_id, user_file)
         if not process_file_stat['status']:
             return JsonResponse({"message": process_file_stat["message"]})
 
         df = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                      f'{user_id}/processed_files/processed_data.csv', 'csv')
+                                      f'{user_id}/{user_file["file_name"]}/processed_files/processed_data.csv', 'csv')
         df.to_csv(file_path, index=False)
 
         metadata_str = ", ".join(df.columns.tolist())
@@ -1912,12 +1926,12 @@ def gen_ai_bot(request):
                                                   f'please retry with all the required inputs '
                     }, status=200)
                 if not aws_s3_obj.check_s3_file(s3_cred["credentials"]['base_bucket_name'],
-                                                f'{user_id}/output/models/rf/{bot_data["target_column"]}/deployment.json'):
+                                                f'{user_id}/{user_file["file_name"]}/output/models/rf/{bot_data["target_column"]}/deployment.json'):
                     print("userid", user_id)
                     _ = random_forest(df, bot_data.get('target_column'), user_id)
                 df = pd.DataFrame([bot_data.get('features')])
                 loaded_pipeline = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                                           f'{user_id}/output/models/rf/{bot_data["target_column"]}/pipeline.pkl',
+                                                           f'{user_id}/{user_file["file_name"]}/output/models/rf/{bot_data["target_column"]}/pipeline.pkl',
                                                            'pkl')
                 predictions = loaded_pipeline.predict(df)
                 print(predictions)
@@ -2199,11 +2213,12 @@ def kmeans_train(data, col, user_id):
 
         # Fit KMeans to the preprocessed data
         kmeans.fit(X)
-
+        user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                             f'{user_id}/file_properties.json', 'json')
         aws_s3_obj.upload_pickle(kmeans, s3_cred["credentials"]['base_bucket_name'],
-                                 f'{user_id}/output/models/kmeans/{col}/kmeans_model.pkl')
+                                 f'{user_id}/{user_file["file_name"]}/output/models/kmeans/{col}/kmeans_model.pkl')
         aws_s3_obj.upload_pickle(preprocessor, s3_cred["credentials"]['base_bucket_name'],
-                                 f'{user_id}/output/models/kmeans/{col}/preprocessor.pkl')
+                                 f'{user_id}/{user_file["file_name"]}/output/models/kmeans/{col}/preprocessor.pkl')
 
         # Add cluster labels to the original data
         data['Cluster'] = kmeans.labels_
@@ -2218,9 +2233,11 @@ def arima_train(data, target_col, user_id, bot_query=None):
         # Identify date column by checking for datetime type
         date_column = None
         results = {}
-        print("Path:", f'{user_id}/output/models/Arima/{target_col}/{target_col}_results.json')
+        user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
+                                             f'{user_id}/file_properties.json', 'json')
+        print("Path:", f'{user_id}/{user_file["file_name"]}/output/models/Arima/{target_col}/{target_col}_results.json')
         if not aws_s3_obj.check_s3_file(s3_cred["credentials"]['base_bucket_name'],
-                                        f'{user_id}/output/models/Arima/{target_col}/{target_col}_results.json'):
+                                        f'{user_id}/{user_file["file_name"]}/output/models/Arima/{target_col}/{target_col}_results.json'):
             for col in data.columns:
                 if data.dtypes[col] == 'object':
                     try:
@@ -2250,7 +2267,7 @@ def arima_train(data, target_col, user_id, bot_query=None):
                     {'data_freq': train_frequency, 'date_column': date_column,
                      'end_date': f'{data_actual.index[-1]}'},
                     s3_cred["credentials"]['base_bucket_name'],
-                    f'{user_id}/output/models/Arima/{target_col}/{target_col}_results.json', 'json')
+                    f'{user_id}/{user_file["file_name"]}/output/models/Arima/{target_col}/{target_col}_results.json', 'json')
 
             except Exception as e:
                 print(e)
@@ -2259,7 +2276,7 @@ def arima_train(data, target_col, user_id, bot_query=None):
         periods = bot_query['forecast_horizon']
         print("downloading filess")
         loaded_model = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                                f'{user_id}/output/models/Arima/{target_col}/{frequency}/best_model.pkl',
+                                                f'{user_id}/{user_file["file_name"]}/output/models/Arima/{target_col}/{frequency}/best_model.pkl',
                                                 'pkl')
 
         freq_map = {

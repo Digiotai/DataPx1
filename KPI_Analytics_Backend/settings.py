@@ -13,7 +13,9 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 import os
 from pathlib import Path
 from corsheaders.defaults import default_headers
+from dotenv import load_dotenv
 
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -87,11 +89,11 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # For file uploads in memory
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'Aipriori_db',
-        'USER': 'Admin',
-        'PASSWORD': 'npg_kKjoMI9abgX5',
-        'HOST': 'ep-yellow-recipe-a5fny139.us-east-2.aws.neon.tech',
-        'PORT': '5432',
+        'NAME': os.environ.get('DB_NAME'),
+        'USER': os.environ.get('DB_USER'),
+        'PASSWORD': os.environ.get('DB_PASSWORD'),
+        'HOST': os.environ.get('DB_HOST'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
     }
 }
 
@@ -150,6 +152,7 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+AUTH_USER_MODEL = 'backend.CustomUser'
 
 CORS_ORIGIN_ALLOW_ALL = True
 CORS_ALLOW_ALL_ORIGINS = True
@@ -157,6 +160,9 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_HEADERS = list(default_headers) + [
     'x-user-id',
 ]
+
+DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # For request body size
+FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # For file uploads in memory
 
 # Celery Config
 CELERY_BROKER_URL = 'redis://localhost:6379/0'

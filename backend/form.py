@@ -21,7 +21,7 @@ class PlaceholderMixin:
             print(e)
 
 
-class CreateUserForm(PlaceholderMixin, ModelForm):
+class CreateUserForm(ModelForm):
     password = forms.CharField(widget=forms.PasswordInput)
 
     organization = forms.CharField(required=False)

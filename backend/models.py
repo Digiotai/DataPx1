@@ -1,13 +1,26 @@
 from django.db import models
-from django.contrib.auth.models import User
 import random
 from django.contrib.postgres.fields import ArrayField,JSONField
 import uuid
 from django.db import models
+from django.contrib.auth.models import AbstractUser
+from django.core.validators import RegexValidator
+from django.conf import settings
 
+class CustomUser(AbstractUser):
+    username = models.CharField(
+        max_length=150,
+        unique=True,
+        validators=[
+            RegexValidator(
+                regex=r'^[\w -]+$',
+                message='Username can only contain letters, digits, underscores, hyphens, and spaces.'
+            )
+        ],
+    )
 
 class EmailOTP(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     otp = models.CharField(max_length=6)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -71,7 +84,7 @@ class Sessions(models.Model):
 
 class UserRole(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, null=True)
     role = ArrayField(models.CharField(max_length=20))
 
@@ -81,7 +94,7 @@ class UserRole(models.Model):
 
 class AuditLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
     action = models.CharField(max_length=255)
     entity_type = models.CharField(max_length=50)
     entity_id = models.UUIDField()
@@ -109,3 +122,10 @@ class ChatMessage(models.Model):
     response = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
     token_count = models.IntegerField(null=True, blank=True)
+
+class UserSelectedFile(models.Model):
+    user = models.IntegerField(null=True, blank=True)
+    s3_key = models.CharField(max_length=512)
+    file_name = models.CharField(max_length=256)
+    last_selected = models.DateTimeField(auto_now=True)
+

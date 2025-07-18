@@ -47,13 +47,17 @@ from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.stattools import adfuller
 from wordcloud import WordCloud
 from xgboost import XGBRegressor
-from .models import Tenant, Organization, UserRole, User, Roles, Sessions
+from .models import Tenant, Organization, UserRole, Roles, Sessions
 from .database import PostgreSQLDB
 from .form import CreateUserForm
 from django.utils import timezone
 from .aws_s3 import s3_crud
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
+from django.contrib.auth import get_user_model
+
+
+User = get_user_model()
 
 # Create your views here.
 
@@ -121,31 +125,35 @@ def loginPage(request):
         if user is not None:
             # Log the user in
             login(request, user)
+            user_role = None
+            tenant = None
+            organization = None
             try:
                 user_role = UserRole.objects.get(user_id=user.id)
                 organization = Organization.objects.get(id=user_role.organization.id)
                 tenant = Tenant.objects.get(id=organization.tenant_id)
             except Exception as e:
-                return JsonResponse({"status": "error", "message": f"{e}"}, status=400)
+                print(e)
+
             # Prepare the user details to return as a response
             user_details = {
                 'username': user.username,
                 'email': user.email,
                 'id': user.id,
                 'last_login': user.last_login,
-                'role': user_role.role,
+                'role': user_role.role if user_role else None,
                 'tenant': {
                     'tenant_id': tenant.id,
                     'tenant_name': tenant.name,
                     'tenant_type': tenant.type,
                     'tenant_timeout': tenant.timeout
-                },
+                } if tenant else tenant,
                 'organization': {
                     'organization_id': organization.id,
                     'organization_name': organization.name,
                     'organization_logo': organization.image_data,
                     'organization_logo_name': organization.image_name
-                }
+                } if organization else organization,
             }
 
             return JsonResponse({"status": "success", "user": user_details})
@@ -1321,7 +1329,7 @@ def data_processing(request):
                         numeric_vars[i] = data
                     elif str(j) in ["object"] and i not in ['Remark']:
                         categorical_vars.append({i: df[i].nunique()})
-                    elif str(j) in ["datetime64[ns]"]:
+                    elif str(j) in ["datetime64[ns]", "datetime64[ns, UTC]"]:
                         if i.upper() in ['DATE', "TIME", "DATE_TIME"]:
                             td = i
                         datetime_vars.append(i)
@@ -1526,7 +1534,7 @@ def kpi_prompt(request):
                 os.makedirs(user_dir, exist_ok=True)
                 file_path = os.path.join(user_dir, 'data.csv')
                 user_file = aws_s3_obj.download_file(s3_cred["credentials"]['base_bucket_name'],
-                                                     f'{user_id}/{user_file["file_name"]}/input_files/file_properties.json', 'json')
+                                                     f'{user_id}/file_properties.json', 'json')
                 process_file_stat = check_processed_file(user_id, user_file)
                 if not process_file_stat['status']:
                     return JsonResponse({"message": process_file_stat['message']})

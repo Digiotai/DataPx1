@@ -1134,6 +1134,16 @@ def uploadFile(request):
     except Exception as e:
         return HttpResponse(str(e))
 
+@csrf_exempt
+def delete_s3_user_file(request):
+    try:
+        file_name = request.POST.get('file_name')
+        user_id = request.headers.get('X-User-ID')
+        aws_s3_obj.delete_s3_folder(s3_cred["credentials"]['base_bucket_name'],
+                                    f'{user_id}/{file_name}')
+        return JsonResponse({"message": "File deleted successfully", "status": True})
+    except Exception as e:
+        return JsonResponse({"message": f"Failed to delete the file: {str(e)}", "status": False})
 
 @csrf_exempt
 def check_input_file(request):

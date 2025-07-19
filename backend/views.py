@@ -3,6 +3,7 @@ import io
 import json
 import os
 import re
+import markdown
 import shutil
 from collections import defaultdict
 from django.core.mail import send_mail
@@ -77,6 +78,26 @@ db = PostgreSQLDB(dbname='Aipriori_db', user='test_owner', password='tcWI7unQ6RE
 aws_s3_obj = s3_crud(s3_cred["credentials"]["aws_access_key_id"], s3_cred["credentials"]["aws_secret_access_key"],
                      s3_cred["credentials"]["region_name"])
 
+registration_text = """
+Hi user_name,
+
+Welcome to DataPx1!
+
+Your account has been successfully created. Please find your login details below:
+
+Username: user_name
+Temporary Password:  user_password 
+
+For security reasons, we recommend resetting your password immediately after logging in.
+
+Reset your password using this link:
+{{ password_reset_link }}
+
+If you have any questions or need assistance, feel free to reply to this email or reach out to our support team.
+
+Best regards,
+DataPx1 Team
+"""
 
 def index(request):
     return HttpResponse("Hai")
@@ -97,8 +118,8 @@ def registerPage(request):
                         organization=form.cleaned_data["organization"],
                         role=form.cleaned_data["roles"]
                     )
-
-                send_otp_email(user)
+                registration_mail_text = registration_text.replace("user_name", user.username).replace("user_password", form.cleaned_data["password"])
+                send_registration_mail(user, registration_mail_text)
                 return JsonResponse({"message": "User created", "user_id": str(user.id)})
             except Exception as e:
                 print(e)
@@ -938,6 +959,15 @@ def resend_otp(request, u_id):
     except Exception as e:
         return JsonResponse({"status": "error", "message": str(e)}, status=400)
 
+
+def send_registration_mail(user, user_text):
+    send_mail(
+        "Registration Mail",
+        user_text,
+        'alimisumanth729@gmail.com',
+        [user.email],
+        fail_silently=False,
+    )
 
 def send_otp_email(user):
     otp_entry, created = EmailOTP.objects.get_or_create(user=user)
@@ -1962,19 +1992,84 @@ def gen_ai_bot(request):
             except Exception as e:
                 return JsonResponse({"text_pre_code_response": str(e)})
         else:
+            system_prompt = f"""
+                                You are an intelligent data analytics and visualization assistant with access to a dataset located at: {file_path}.
+                                
+                                ### Dataset Information:
+                                - **Attributes**: {metadata_str}
+                                - **Sample Data**: {sample_data}
+                                - Always use the **entire dataset** from {file_path} for any analysis or visualization.
+                                
+                                ---
+                                
+                                ### Response Guidelines:
+                                
+                                1. **General Queries**:
+                                   - If the user's question is not related to the dataset (e.g., concept explanations, tool usage, general Python or data science queries), provide a helpful, accurate, and concise answer.
+                                   - Do not reference the dataset in such cases.
+                                
+                                2. **Data Analysis**:
+                                   - If the query requires calculations, summaries, or comparisons:
+                                     - Load the dataset from {file_path}.
+                                     - Perform the required operations.
+                                     - Output the findings as a string and assign to `text_output`.
+                                
+                                3. **Visualization**:
+                                   - For queries requiring charts or graphs:
+                                     - Generate interactive plots using **Plotly**.
+                                     - Assign the plot object to `fig`.
+                                     - Ensure the visuals are informative, clean, and based only on data from {file_path}.
+                                
+                                4. **Forecasting**:
+                                   - If the user asks for predictions:
+                                     - Use **ARIMA** to forecast the required column(s).
+                                     - Assign insights and descriptions to `text_output`.
+                                     - Assign the Plotly chart to `fig`.
+                                5. **Datetime Handling (Important)**
+                                   - Always standardize datetime columns like this:
+                                     ```python
+                                     df['<datetime_col>'] = pd.to_datetime(df['<datetime_col>'], errors='coerce', utc=True)
+                                     ```
+                                   - When matching or filtering datetimes:
+                                     ```python
+                                     query_time = pd.to_datetime(user_input, utc=True)
+                                     matched_df = df[abs(df['<datetime_col>'] - query_time) < pd.Timedelta(days=1)]
+                                     ```
+                                     This ensures matches even when input is just a date (`YYYY-MM-DD`) and dataset has full timestamps.
+                                
+                                6. **Error Handling**
+                                   - If no matching data is found:
+                                     - Check for datetime or string mismatches.
+                                     - Try fuzzy matching for partial dates or strings.
+                                     - Never return "No data found" without checking alternatives.
+                                     
+                                7. **Output Serialization**
+                                   - Ensure `text_output` is always a **JSON-serializable string**:
+                                     - If it's a DataFrame or Series, convert it like this:
+                                       ```python
+                                       text_output = df.to_string(index=False)  # For simple tables
+                                       # OR
+                                       text_output = df.head(10).to_markdown(index=False)  # For markdown-friendly output
+                                       ```
+                                     - If returning lists, dicts, or numpy objects, convert them using `json.dumps()` where needed.
+                                   - Avoid returning raw objects like DataFrames, numpy arrays, or custom classes in `text_output`.
+                                
+                                ---
+                                
+                                ### Output Rules:
+                                - **Textual Insight** → `text_output = "..."`  
+                                - **Chart** → `fig = <plotly.graph_objs.Figure>`  
+                                - **Forecast** → `text_output = "..."` and `fig = <forecast_plot>`
+                                
+                                ---
+                                
+                                ### Additional Rules:
+                                - Never mention limitations about file access or path issues.
+                                - Always use {file_path} as the sole data source.
+                                - Provide direct, user-friendly answers without unnecessary technical disclaimers.
+                                
+                                """
 
-            system_prompt = f"""You are an AI specialized in data analytics and visualization. The data for analysis is 
-            stored in a CSV file stored at {file_path}, with the following attributes: {metadata_str} and sample data as 
-            {sample_data}.
-
-            Follow these rules while responding to user queries:
-
-            1. Strictly use {file_path} as the data source path without stating any limitations or disclaimers about file access.
-            2. Data Analysis: If the query requires numerical or tabular insights, extract relevant data from 
-            data.csv, perform necessary calculations, and provide a concise summary. Store the result in text_output.
-            3. Visualization: If the query requires a graph, generate Python code using Plotly with fig as output.
-            4. Forecasting: Generate forecast using ARIMA and store results in text_output and plot in fig.
-            """
             messages = [{"role": "system", "content": system_prompt}]
             # history = ChatMessage.objects.filter(session=session).order_by('timestamp')
             chat_pairs = []
@@ -2027,14 +2122,14 @@ def gen_ai_bot(request):
             pre_code_text, post_code_text, code = process_genai_response(response)
             result.update({
                 'text_pre_code_response': pre_code_text,
-                'text_post_code_response': post_code_text
+                'text_post_code_response': markdown.markdown(post_code_text)
             })
 
             if 'import' in code:
                 namespace = {}
                 try:
                     exec(code, namespace)
-                    result['text_output'] = namespace.get('text_output')
+                    result['text_output'] = namespace.get('text_output')  # HTML rendered version
 
                     fig = namespace.get('fig')
                     if fig and isinstance(fig, Figure):

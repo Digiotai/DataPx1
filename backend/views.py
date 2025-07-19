@@ -30,6 +30,7 @@ from django.http import JsonResponse, HttpResponse, HttpResponseBadRequest
 from django.utils.safestring import mark_safe
 from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Q
+from django.db.models import OuterRef, Subquery
 from dotenv import load_dotenv
 from keras.models import load_model
 from openai import OpenAI
@@ -666,12 +667,13 @@ def UserSessions(request, s_id=None):
                 loginTime=loginTime,
                 status='active'
             )
+            org_name = Organization.objects.filter(id=session_obj.orgId).values_list('name', flat=True).first()
             session_details = {
                 "session_id": session_obj.id,
                 "userId": session_obj.userId,
                 "userName": session_obj.userName,
                 "userEmail": session_obj.userEmail,
-                "orgId": session_obj.orgId,
+                "orgName": org_name,
                 "ipAddress": session_obj.ipAddress,
                 "deviceInfo": session_obj.deviceInfo,
                 "loginTime": session_obj.loginTime
@@ -704,7 +706,22 @@ def UserSessions(request, s_id=None):
                 endDate = endDate.replace(hour=23, minute=59, second=59)
                 filters['loginTime__range'] = (startDate, endDate)
             sessions_qs = Sessions.objects.filter(**filters)
-            sessions_data = list(sessions_qs.values())
+            sessions_data = []
+            for session in sessions_qs:
+                org_name = Organization.objects.filter(id=session.orgId).values_list('name', flat=True).first()
+                sessions_data.append({
+                    "session_id": session.id,
+                    "userId": session.userId,
+                    "userName": session.userName,
+                    "userEmail": session.userEmail,
+                    "orgName": org_name,
+                    "ipAddress": session.ipAddress,
+                    "deviceInfo": session.deviceInfo,
+                    "loginTime": session.loginTime,
+                    "logoutTime": session.logoutTime,
+                    "durationMinutes": session.durationMinutes,
+                    "status": session.status
+                })
 
             total = sessions_qs.count()
             active_sessions = sessions_qs.filter(status='active').count()
@@ -718,12 +735,13 @@ def UserSessions(request, s_id=None):
         if s_id:
             try:
                 session_obj = Sessions.objects.get(id=s_id)
+                org_name = Organization.objects.filter(id=session_obj.orgId).values_list('name', flat=True).first()
                 session_details = {
                     "session_id": session_obj.id,
                     "userId": session_obj.userId,
                     "userName": session_obj.userName,
                     "userEmail": session_obj.userEmail,
-                    "orgId": session_obj.orgId,
+                    "orgName": org_name,
                     "ipAddress": session_obj.ipAddress,
                     "deviceInfo": session_obj.deviceInfo,
                     "loginTime": session_obj.loginTime,
@@ -738,9 +756,14 @@ def UserSessions(request, s_id=None):
                     "message": f"Session with ID {o_id} does not exist."
                 }, status=400)
 
-        session_obj = Sessions.objects.all().values('id', "userId", "userName", "userEmail", "orgId", "ipAddress",
-                                                    "deviceInfo", "loginTime", "logoutTime", "durationMinutes",
-                                                    "status")
+        org_name_subquery = Organization.objects.filter(id=OuterRef('orgId')).values('name')[:1]
+
+        session_obj = Sessions.objects.all().annotate(
+            orgName=Subquery(org_name_subquery)
+        ).values(
+            'id', "userId", "userName", "userEmail", "orgName", "ipAddress",
+            "deviceInfo", "loginTime", "logoutTime", "durationMinutes", "status"
+        )
         return JsonResponse({'status': 'success', 'sessions': list(session_obj)})
 
 

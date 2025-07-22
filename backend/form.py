@@ -37,7 +37,7 @@ class CreateUserForm(ModelForm):
     def clean_organization(self):
         org_id = self.cleaned_data.get('organization')
         if not org_id:
-            return None
+            raise ValidationError("Organization ID is required")
 
         try:
             return Organization.objects.get(id=org_id)

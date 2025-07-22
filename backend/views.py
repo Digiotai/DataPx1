@@ -114,12 +114,11 @@ def registerPage(request):
                 user = form.save(commit=False)
                 user.is_active = False
                 user.save()
-                if form.cleaned_data.get("organization") or form.cleaned_data.get("roles"):
-                    UserRole.objects.create(
-                        user=user,
-                        organization=form.cleaned_data["organization"],
-                        role=form.cleaned_data["roles"]
-                    )
+                UserRole.objects.create(
+                    user=user,
+                    organization=form.cleaned_data["organization"],
+                    role=form.cleaned_data["roles"]
+                )
                 registration_mail_text = registration_text.replace("user_name", user.username).replace("user_password", form.cleaned_data["password"])
                 send_registration_mail(user, registration_mail_text)
                 return JsonResponse({"message": "User created", "user_id": str(user.id)})
@@ -961,9 +960,11 @@ def get_users(request, u_id=None):
     elif request.method == 'DELETE':
         try:
             user = User.objects.get(id=u_id)
-            user_role = UserRole.objects.get(user=user)
-
-            user_role.delete()
+            try:
+                user_role = UserRole.objects.get(user=user)
+                user_role.delete()
+            except Exception as e:
+                print(e)
             user.delete()
             return JsonResponse({"status": "success", "message": 'User Deleted'}, status=200)
         except Exception as e:

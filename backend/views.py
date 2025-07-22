@@ -92,7 +92,8 @@ Temporary Password:  user_password
 For security reasons, we recommend resetting your password immediately after logging in.
 
 Reset your password using this link:
-{{ password_reset_link }}
+
+https://kalmar.datapx1.com/reset-password
 
 If you have any questions or need assistance, feel free to reply to this email or reach out to our support team.
 
@@ -905,10 +906,6 @@ def get_users(request, u_id=None):
 
             except Exception as e:
                 return JsonResponse({"status": "error", "message": str(e)}, status=400)
-
-
-
-
     elif request.method == 'POST':
         if not u_id:
             return HttpResponseBadRequest("User ID required for update.")
@@ -974,11 +971,14 @@ def get_users(request, u_id=None):
 
 
 @csrf_exempt
-def resend_otp(request, u_id):
+def send_otp(request):
     try:
-        user = User.objects.get(id=u_id)
+        u_email = request.POST.get('email')
+        user = User.objects.get(email=u_email)
         send_otp_email(user)
         return JsonResponse({"status": "success", "message": "OTP sent to the registered mail"}, status=200)
+    except User.DoesNotExist:
+        return JsonResponse({"status": 'error', "message": "User Not found"}, status=400)
     except Exception as e:
         return JsonResponse({"status": "error", "message": str(e)}, status=400)
 
@@ -1019,7 +1019,9 @@ def verify_otp(request):
                 otp_entry.delete()
                 return JsonResponse({
                     "status": "success",
-                    "message": "OTP verified"
+                    "message": "OTP verified",
+                    "user_id": user.id,
+                    "user_email": user.email,
                 }, status=200)
             else:
                 return JsonResponse({
@@ -1424,14 +1426,15 @@ def data_processing(request):
                 missingvalue = pd.DataFrame({"Parameters": parameters, 'Missing Value Count': Count})
 
                 duplicate_records = df[df.duplicated(keep='first')].shape[0]
-                df[datetime_vars] = df[datetime_vars].apply(pd.to_datetime, errors='coerce').apply(
+                df_copy = df.copy()
+                df_copy[datetime_vars] = df_copy[datetime_vars].apply(pd.to_datetime, errors='coerce').apply(
                     lambda col: col.dt.strftime('%Y-%m-%d %H:%M:%S'))
 
                 return JsonResponse(
                     {'nof_rows': str(nor), 'nof_columns': str(nof), 'timestamp': timestamp,
                      "single_value_columns": ",".join(single_value_columns) if len(
                          single_value_columns) > 0 else "NA",
-                     'data': df.iloc[:100].to_json(),
+                     'data': df_copy.iloc[:100].to_json(),
                      "data description": df.dtypes.apply(lambda x: 'string' if x == 'object' else x.name).to_dict(),
                      "sentiment": sentiment,
                      "stationary": stationary,
@@ -2818,13 +2821,11 @@ def generate_gpt_insight_payload(fig, fallback_title: str = "Chart"):
 
 
 def updatedtypes(df):
-    datatypes = df.dtypes
-    for col in df.columns:
-        if datatypes[col] == 'object':
-            try:
-                df[col] = pd.to_datetime(df[col])
-            except Exception as e:
-                pass
+    for col in df.select_dtypes(include=['object', 'string']).columns:
+        try:
+            df[col] = pd.to_datetime(df[col], utc=True, errors='raise')
+        except (ValueError, TypeError):
+            pass  # Skip columns that can't be converted
     return df
 
 

@@ -5,8 +5,6 @@ urlpatterns = [
     path('', index, name='index'),
     # User Management
     path('api/create_user', registerPage, name="register"),
-    path('api/send_email_otp/<int:u_id>', resend_otp, name='send_email_otp'),
-    path('api/otp_verification', verify_otp, name="otpverification"),
     path('api/login', loginPage, name="login"),
     path('api/googlelogin', googlelogin, name="googlelogin"),
     path('api/logout', logoutUser, name="logout"),
@@ -23,7 +21,8 @@ urlpatterns = [
     path('api/modify_role/<str:r_id>', modify_role),
     path('api/sessions', UserSessions),
     path('api/sessions/<str:s_id>', UserSessions),
-    path('api/send_otp/<str:u_id>', resend_otp),
+    path('api/send_otp', send_otp),
+    path('api/otp_verification', verify_otp, name="otpverification"),
 
 
     path('api/gptresponse/', gpt_response, name='gptresponse'),
